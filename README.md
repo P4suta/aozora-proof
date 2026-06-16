@@ -38,6 +38,37 @@ $ aozora-proof check --fail-on warning chapter*.txt
 Exit codes: `0` clean · `1` findings (`--strict`, or at/above `--fail-on`) ·
 `2` usage / IO error · `3` internal-source finding (a tool bug).
 
+## CI / pre-commit
+
+GitHub Action — runs the checks and uploads findings to the Security tab as SARIF:
+
+```yaml
+# .github/workflows/aozora-proof.yml
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: P4suta/aozora-proof/action@main
+        with:
+          files: "**/*.txt"
+          fail-on: error
+```
+
+pre-commit ([pre-commit.com](https://pre-commit.com)):
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/P4suta/aozora-proof
+    rev: main
+    hooks:
+      - id: aozora-proof
+```
+
 ## Workspace
 
 | crate | role |

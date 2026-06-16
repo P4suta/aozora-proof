@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -56,6 +57,8 @@ enum Format {
     Human,
     Json,
     Short,
+    /// SARIF 2.1.0 — for GitHub code-scanning upload.
+    Sarif,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -96,6 +99,7 @@ fn run_check(args: &CheckArgs) -> ExitCode {
     match resolve_format(args.format) {
         Format::Json => print_json(&results),
         Format::Short => print_short(&results),
+        Format::Sarif => print_sarif(&results),
         Format::Human | Format::Auto => print_human(&results),
     }
 
@@ -183,6 +187,67 @@ fn print_human(results: &[(String, Report)]) {
         println!("✓ 問題は見つかりませんでした。");
     } else {
         println!("{total} 件の指摘が見つかりました。");
+    }
+}
+
+/// SARIF 2.1.0 report for GitHub code-scanning upload.
+fn print_sarif(results: &[(String, Report)]) {
+    let mut rules: BTreeMap<&str, serde_json::Value> = BTreeMap::new();
+    let mut sarif_results: Vec<serde_json::Value> = Vec::new();
+    for (label, report) in results {
+        for finding in &report.findings {
+            rules.entry(finding.code).or_insert_with(|| {
+                serde_json::json!({
+                    "id": finding.code,
+                    "name": finding.kind(),
+                    "shortDescription": { "text": finding.code },
+                })
+            });
+            let (start_line, start_col) = line_col(&report.decoded, finding.span.start);
+            let (end_line, end_col) = line_col(&report.decoded, finding.span.end);
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding.code,
+                "level": sarif_level(finding.severity),
+                "message": { "text": finding.message },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": label },
+                        "region": {
+                            "startLine": start_line,
+                            "startColumn": start_col,
+                            "endLine": end_line,
+                            "endColumn": end_col,
+                        },
+                    },
+                }],
+            }));
+        }
+    }
+    let doc = serde_json::json!({
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "aozora-proof",
+                    "informationUri": "https://github.com/P4suta/aozora-proof",
+                    "rules": rules.into_values().collect::<Vec<_>>(),
+                },
+            },
+            "results": sarif_results,
+        }],
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_owned())
+    );
+}
+
+const fn sarif_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Note => "note",
     }
 }
 

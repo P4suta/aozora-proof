@@ -15,6 +15,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wire format that is a superset of the parser's diagnostic shape.
 - `aozora-proof-data`: a `char → JIS 水準` classifier and 機種依存文字
   predicate, baked at build time from the Project X0213 mapping table.
-- `aozora-proof` CLI: `check` with human / JSON / short output, stdin and
-  multi-file input, `--strict` / `--fail-on`, and a 0 / 1 / 2 / 3 exit-code
+- `aozora-proof` CLI: `check` with human / JSON / short / **SARIF** output, stdin
+  and multi-file input, `--strict` / `--fail-on`, and a 0 / 1 / 2 / 3 exit-code
   contract for CI.
+- A composite **GitHub Action** (`action/`) that runs the checks and uploads
+  SARIF to the Security tab, and a **pre-commit** hook (`.pre-commit-hooks.yaml`)
+  for downstream `.txt` repositories.
