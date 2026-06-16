@@ -22,6 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   layer): flags 旧字体 / 異体字 characters that have a 新字体 counterpart (derived
   from the 常用漢字表) and suggests the modern form; `check --diff` / `--fix`
   preview or apply the replacements.
+- **Gaiji (外字) lookup** (`aozora-proof-data` + the `gaiji_dict` module + the
+  `aozora-proof gaiji` subcommand): character ⇔ JIS 面区点 ⇔ Unicode and
+  description search over the CC0 外字注記辞書, with a suggested 外字注記 form.
 - A composite **GitHub Action** (`action/`) that runs the checks and uploads
   SARIF to the Security tab, and a **pre-commit** hook (`.pre-commit-hooks.yaml`)
   for downstream `.txt` repositories.

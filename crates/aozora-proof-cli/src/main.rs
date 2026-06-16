@@ -12,6 +12,7 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use aozora_proof_core::gaiji_dict::{self, GaijiInfo};
 use aozora_proof_core::{
     Finding, FindingSource, Report, SCHEMA_VERSION, Severity, Suggestion, run_all,
 };
@@ -32,6 +33,8 @@ struct Cli {
 enum Command {
     /// テキストを校正する（記法＋文字レベル）。
     Check(CheckArgs),
+    /// 外字（gaiji）を参照・検索する（注記 ⇔ 文字 ⇔ 面区点 ⇔ Unicode）。
+    Gaiji(GaijiArgs),
 }
 
 #[derive(Args)]
@@ -61,6 +64,28 @@ struct CheckArgs {
     fix: bool,
 }
 
+#[derive(Args)]
+struct GaijiArgs {
+    /// 調べたい文字（先頭1文字）。
+    character: Option<String>,
+
+    /// 面区点から引く（例: 1-84-25）。
+    #[arg(long, value_name = "M-K-T")]
+    men_ku_ten: Option<String>,
+
+    /// Unicode 符号位置から引く（例: U+20089）。
+    #[arg(long, value_name = "U+XXXX")]
+    unicode: Option<String>,
+
+    /// 注記の説明文を部分一致検索する。
+    #[arg(long, value_name = "QUERY")]
+    search: Option<String>,
+
+    /// 出力形式（auto / human / json）。
+    #[arg(long, value_enum, default_value_t = Format::Auto)]
+    format: Format,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum Format {
     Auto,
@@ -82,6 +107,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Check(args) => run_check(&args),
+        Command::Gaiji(args) => run_gaiji(&args),
     }
 }
 
@@ -383,4 +409,117 @@ fn apply_suggestions(decoded: &str, subs: &[&Suggestion]) -> String {
         }
     }
     text
+}
+
+fn run_gaiji(args: &GaijiArgs) -> ExitCode {
+    let json = matches!(resolve_format(args.format), Format::Json);
+
+    if let Some(query) = &args.search {
+        let hits = gaiji_dict::search(query);
+        if json {
+            let matches: Vec<serde_json::Value> = hits
+                .iter()
+                .map(|&(desc, c)| {
+                    serde_json::json!({
+                        "description": desc,
+                        "char": c.to_string(),
+                        "codepoint": format!("U+{:04X}", u32::from(c)),
+                    })
+                })
+                .collect();
+            let doc = serde_json::json!({ "query": query, "matches": matches });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_owned())
+            );
+        } else {
+            for (desc, c) in &hits {
+                println!("{c}\tU+{:04X}\t{desc}", u32::from(*c));
+            }
+            eprintln!("aozora-proof gaiji: {} match(es)", hits.len());
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    let ch = if let Some(s) = &args.character {
+        s.chars().next()
+    } else if let Some(mkt) = &args.men_ku_ten {
+        parse_men_ku_ten(mkt).and_then(|(m, k, t)| gaiji_dict::from_men_ku_ten(m, k, t))
+    } else if let Some(u) = &args.unicode {
+        parse_unicode(u)
+    } else {
+        eprintln!(
+            "aozora-proof gaiji: 文字 / --men-ku-ten / --unicode / --search のいずれかを指定してください"
+        );
+        return ExitCode::from(2);
+    };
+
+    ch.map_or_else(
+        || {
+            eprintln!("aozora-proof gaiji: 該当する文字が見つかりません");
+            ExitCode::from(1)
+        },
+        |ch| {
+            print_gaiji_info(&gaiji_dict::lookup(ch), json);
+            ExitCode::SUCCESS
+        },
+    )
+}
+
+/// Parse a `men-ku-ten` string like `1-84-25`.
+fn parse_men_ku_ten(s: &str) -> Option<(u8, u8, u8)> {
+    let mut parts = s.split('-');
+    let men = parts.next()?.parse().ok()?;
+    let ku = parts.next()?.parse().ok()?;
+    let ten = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((men, ku, ten))
+}
+
+/// Parse `U+XXXX` (or a bare hex codepoint) into a `char`.
+fn parse_unicode(s: &str) -> Option<char> {
+    let hex = s
+        .strip_prefix("U+")
+        .or_else(|| s.strip_prefix("u+"))
+        .unwrap_or(s);
+    u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+}
+
+fn print_gaiji_info(info: &GaijiInfo, json: bool) {
+    if json {
+        let men_ku_ten = info.men_ku_ten.map(|m| {
+            serde_json::json!({ "men": m.men, "ku": m.ku, "ten": m.ten, "level": m.level.label() })
+        });
+        let doc = serde_json::json!({
+            "char": info.character.to_string(),
+            "codepoint": format!("U+{:04X}", info.codepoint),
+            "menKuTen": men_ku_ten,
+            "descriptions": info.descriptions,
+            "chuki": info.chuki,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_owned())
+        );
+    } else {
+        println!("文字: {}  (U+{:04X})", info.character, info.codepoint);
+        match info.men_ku_ten {
+            Some(m) => println!(
+                "面区点: {}-{}-{}  ({})",
+                m.men,
+                m.ku,
+                m.ten,
+                m.level.label()
+            ),
+            None => println!("面区点: —（JIS X 0213 外）"),
+        }
+        if !info.descriptions.is_empty() {
+            println!("注記説明: {}", info.descriptions.join(" / "));
+        }
+        if let Some(chuki) = &info.chuki {
+            println!("外字注記: {chuki}");
+        }
+    }
 }
