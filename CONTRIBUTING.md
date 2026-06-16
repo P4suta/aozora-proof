@@ -17,23 +17,43 @@ of all sizes are welcome.
 
 ## Setup
 
+One command bootstraps everything — toolchain components, dev tools, git hooks:
+
 ```console
-$ rustup show                 # picks up rust-toolchain.toml
-$ lefthook install            # pre-commit / pre-push hooks (recommended)
-$ cargo test --workspace
+$ ./bootstrap.sh      # installs cargo-binstall + just, then runs `just setup`
+$ just doctor         # verify your toolchain + tools match what CI pins
 ```
+
+Already have `just`? `just setup` alone does the same. The pieces are also
+available individually: `just setup-toolchain`, `just setup-tools`, `just hooks`.
+Tool versions are pinned in [`dev-tools.txt`](./dev-tools.txt).
 
 ## Development loop
 
 ```console
-$ cargo check  --workspace --all-targets        # fast
-$ cargo test   --workspace --all-targets
-$ cargo clippy --workspace --all-targets -- -D warnings
-$ cargo fmt --all
-$ just ci                                        # everything CI runs
+$ just check          # fast "still compiles?"
+$ just test           # tests + doctests (nextest when present, like CI)
+$ just clippy         # -D warnings, like CI
+$ just fmt            # auto-format
+$ just ci             # everything CI's gating jobs run
+$ just ci-full        # + the coverage job (full CI parity)
 ```
 
-`bacon` (`bacon` / `bacon clippy` / `bacon test`) gives a fast watch loop.
+`just --list` shows every recipe. `bacon` (`bacon` / `bacon clippy` /
+`bacon nextest`) gives a fast watch loop. `just doctor` reports whether your
+local tools match the versions CI pins.
+
+## Troubleshooting
+
+- **clippy/fmt passes locally but fails in CI** — your `rustc` may differ from
+  the pinned channel. Run `just doctor`; `rustup show` re-syncs to
+  `rust-toolchain.toml` (unset `RUSTUP_TOOLCHAIN` if it is set).
+- **`typos` flags a domain term** — add it to `_typos.toml` under
+  `[default.extend-words]`.
+- **`mold: linker not found`** — mold is optional (see `.cargo/config.toml`);
+  unset the linker `RUSTFLAGS` or install mold.
+- **Can't reproduce a CI failure locally** — `just ci-full` runs every CI job
+  (nextest + lint + deny + coverage) in one shot.
 
 ## Pull requests
 

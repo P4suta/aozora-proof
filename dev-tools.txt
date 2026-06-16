@@ -1,0 +1,17 @@
+# Dev tools for aozora-proof — consumed by `just setup` (via cargo-binstall).
+#
+# Format: one `crate[@version-req]` per line. `@0.9` is a semver requirement
+# (^0.9), so patch updates flow in automatically while the minor stays pinned
+# for local == CI parity. Blank lines and `#` comments are ignored.
+#
+# Keep these minors in step with the `tools:` versions in the CI composite
+# action (.github/actions/setup-rust). Bump together.
+
+cargo-nextest@0.9      # test runner — CI's `test` job uses this
+cargo-deny@0.19        # supply-chain / license gate — CI's `deny` job
+cargo-llvm-cov@0.8     # coverage — CI's `coverage` job
+wasm-pack@0.15         # builds the browser WASM package (web/ dev loop)
+typos-cli@1.47         # spell check — CI's `lint` job
+bacon@3                # background watch loop (see bacon.toml)
+miniserve@0.35         # tiny static server for `just serve` / `just web`
+watchexec-cli@2.5      # file-watch trigger for `just web`
