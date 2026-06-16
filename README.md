@@ -33,6 +33,9 @@ $ aozora-proof check seihon.txt
 $ cat seihon.txt | aozora-proof check -
 $ aozora-proof check --format json *.txt          # machine-readable, for CI
 $ aozora-proof check --fail-on warning chapter*.txt
+$ aozora-proof check --watch draft.txt            # re-check on every save
+$ aozora-proof explain aozora::char::platform_dependent   # why a code fired
+$ aozora-proof completions zsh > ~/.zfunc/_aozora-proof   # shell completions
 ```
 
 Exit codes: `0` clean · `1` findings (`--strict`, or at/above `--fail-on`) ·

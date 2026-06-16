@@ -11,6 +11,8 @@ use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc::channel;
+use std::time::Duration;
 
 use anstyle::{AnsiColor, Style};
 use aozora_proof_core::gaiji_dict::{self, GaijiInfo};
@@ -20,6 +22,8 @@ use aozora_proof_core::{
 };
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
+use notify::RecursiveMode;
+use notify_debouncer_mini::new_debouncer;
 
 /// Long version string (crate version + git SHA + date + target), set by build.rs.
 const LONG_VERSION: &str = env!("AOZORA_PROOF_LONG_VERSION");
@@ -69,6 +73,10 @@ enum Command {
 }
 
 #[derive(Args)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "CLI mode flags (--strict/--diff/--fix/--watch) are naturally booleans"
+)]
 struct CheckArgs {
     /// 入力ファイル（複数可）。`-` で標準入力を読む。
     #[arg(default_value = "-")]
@@ -93,6 +101,10 @@ struct CheckArgs {
     /// 旧字体→新字体の置換を適用してファイルに書き戻す（UTF-8 で出力）。
     #[arg(long)]
     fix: bool,
+
+    /// ファイル変更を監視して自動で再校正する（human 表示・--fix/--diff とは併用不可）。
+    #[arg(long, conflicts_with_all = ["fix", "diff"])]
+    watch: bool,
 }
 
 #[derive(Args)]
@@ -238,6 +250,10 @@ fn run_completions(shell: Shell) -> ExitCode {
 }
 
 fn run_check(args: &CheckArgs, painter: Painter) -> ExitCode {
+    if args.watch {
+        return run_watch(args, painter);
+    }
+
     let mut results: Vec<(String, Report)> = Vec::new();
     let mut read_error = false;
 
@@ -270,6 +286,71 @@ fn run_check(args: &CheckArgs, painter: Painter) -> ExitCode {
     }
 
     decide_exit(&results, args, read_error)
+}
+
+/// `--watch`: re-run the human-format check whenever a target file changes.
+fn run_watch(args: &CheckArgs, painter: Painter) -> ExitCode {
+    if args.paths.iter().any(|p| p.as_os_str() == "-") {
+        eprintln!("aozora-proof: --watch は標準入力では使えません。ファイルを指定してください。");
+        return ExitCode::from(2);
+    }
+
+    check_once(args, painter);
+
+    let (tx, rx) = channel();
+    let Ok(mut debouncer) = new_debouncer(Duration::from_millis(300), tx) else {
+        eprintln!("aozora-proof: ファイル監視を初期化できませんでした。");
+        return ExitCode::from(2);
+    };
+
+    // Watch each target's parent directory — robust to editors' atomic saves.
+    let mut watched = std::collections::BTreeSet::new();
+    for path in &args.paths {
+        let dir = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        if !watched.insert(dir.clone()) {
+            continue;
+        }
+        if let Err(err) = debouncer.watcher().watch(&dir, RecursiveMode::NonRecursive) {
+            eprintln!("aozora-proof: {}: 監視できません: {err}", dir.display());
+        }
+    }
+
+    let targets: Vec<std::ffi::OsString> = args
+        .paths
+        .iter()
+        .filter_map(|p| p.file_name().map(std::ffi::OsStr::to_os_string))
+        .collect();
+
+    eprintln!("監視中… 変更で再校正します（Ctrl-C で終了）。");
+    for result in rx {
+        let Ok(events) = result else { continue };
+        let touched = events.iter().any(|e| {
+            e.path
+                .file_name()
+                .is_some_and(|n| targets.iter().any(|t| t.as_os_str() == n))
+        });
+        if touched {
+            check_once(args, painter);
+            eprintln!("監視中… 変更で再校正します（Ctrl-C で終了）。");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Clear the screen and run one human-format pass (used by `--watch`).
+fn check_once(args: &CheckArgs, painter: Painter) {
+    print!("\u{1b}[2J\u{1b}[H");
+    let mut results: Vec<(String, Report)> = Vec::new();
+    for path in &args.paths {
+        match read_input(path) {
+            Ok(bytes) => results.push((path.display().to_string(), run_all(&bytes))),
+            Err(err) => eprintln!("aozora-proof: {}: {err}", path.display()),
+        }
+    }
+    print_human(&results, painter);
 }
 
 fn read_input(path: &Path) -> io::Result<Vec<u8>> {

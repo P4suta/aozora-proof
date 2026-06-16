@@ -64,6 +64,8 @@ proptest    = "1.11"
 clap        = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = "4.5"
 anstyle       = "1.0"
+notify                = "8"
+notify-debouncer-mini = "0.7"
 
 # Internal workspace crates.
 aozora-proof-core = { version = "0.0.0", path = "crates/aozora-proof-core" }

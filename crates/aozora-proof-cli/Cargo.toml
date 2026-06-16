@@ -20,6 +20,8 @@ aozora-proof-core = { workspace = true }
 anstyle           = { workspace = true }
 clap              = { workspace = true }
 clap_complete     = { workspace = true }
+notify                = { workspace = true }
+notify-debouncer-mini = { workspace = true }
 serde             = { workspace = true }
 serde_json        = { workspace = true }
 
