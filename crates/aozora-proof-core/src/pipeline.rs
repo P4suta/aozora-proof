@@ -1,8 +1,8 @@
 //! Orchestration — combine the notation layer (the `aozora` parser) and the
 //! character layers (conformance / 旧字体↔新字体 / gaiji) into one [`Report`].
 //!
-//! [`run_all`] runs the notation layer plus the character-conformance layer over
-//! raw bytes; the 旧字体↔新字体 and gaiji layers attach in later milestones.
+//! [`run_all`] runs the notation layer plus the character-conformance and
+//! 旧字体↔新字体 layers over raw bytes; the gaiji layer attaches in a later milestone.
 
 use crate::coords::SpanMap;
 use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
@@ -68,6 +68,7 @@ pub fn run_all(raw: &[u8]) -> Report {
     let decoded = if let Ok(text) = aozora::encoding::decode_auto(raw) {
         findings.extend(run_notation(&text));
         findings.extend(crate::moji::check(&text));
+        findings.extend(crate::kyuji::check(&text));
         text.into_owned()
     } else {
         findings.push(Finding {
@@ -139,7 +140,8 @@ mod tests {
         let text = std::str::from_utf8(raw).unwrap();
         let expected = crate::moji::file_checks::check(raw).len()
             + run_notation(text).len()
-            + crate::moji::check(text).len();
+            + crate::moji::check(text).len()
+            + crate::kyuji::check(text).len();
         let report = run_all(raw);
         assert_eq!(
             report.findings.len(),

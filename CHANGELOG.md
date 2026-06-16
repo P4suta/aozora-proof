@@ -18,6 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `aozora-proof` CLI: `check` with human / JSON / short / **SARIF** output, stdin
   and multi-file input, `--strict` / `--fail-on`, and a 0 / 1 / 2 / 3 exit-code
   contract for CI.
+- **Old-/new-form (旧字体↔新字体) detection** (`aozora-proof-data` + the `kyuji`
+  layer): flags 旧字体 / 異体字 characters that have a 新字体 counterpart (derived
+  from the 常用漢字表) and suggests the modern form; `check --diff` / `--fix`
+  preview or apply the replacements.
 - A composite **GitHub Action** (`action/`) that runs the checks and uploads
   SARIF to the Security tab, and a **pre-commit** hook (`.pre-commit-hooks.yaml`)
   for downstream `.txt` repositories.

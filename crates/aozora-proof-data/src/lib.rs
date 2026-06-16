@@ -76,6 +76,17 @@ pub fn is_platform_dependent(c: char) -> bool {
     !had_errors
 }
 
+/// The 新字体 (modern form) for a 旧字体 / 異体字 character, if one is recorded
+/// in the 常用漢字表-derived table. Returns `None` for characters that are
+/// already a standard form or have no recorded counterpart.
+#[must_use]
+pub fn shinji_for(c: char) -> Option<char> {
+    KYUJI_TO_SHINJI
+        .binary_search_by_key(&u32::from(c), |&(k, _)| k)
+        .ok()
+        .map(|i| KYUJI_TO_SHINJI[i].1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +99,14 @@ mod tests {
         assert_eq!(jis_level('\u{1F363}'), Suijun::Outside); // 🍣 — not in JIS X 0213
         assert_eq!(jis_level('\u{FF5C}'), Suijun::Level1); // ｜ ruby marker, via Fullwidth alias
         assert_eq!(jis_level('\u{FF03}'), Suijun::Level1); // ＃ annotation marker
+    }
+
+    #[test]
+    fn old_to_new_forms() {
+        assert_eq!(shinji_for('\u{4F5B}'), Some('\u{4ECF}')); // 佛 → 仏
+        assert_eq!(shinji_for('\u{4F86}'), Some('\u{6765}')); // 來 → 来
+        assert_eq!(shinji_for('\u{4ECF}'), None); // 仏 is already 新字体
+        assert_eq!(shinji_for('あ'), None);
     }
 
     #[test]

@@ -18,6 +18,7 @@ vendored it is recorded here with its upstream source and license:
 2. 青空文庫 外字注記辞書 (CC0 1.0) — gaiji description ⇔ codepoint, the basis of
    the gaiji reverse index.
 
-Old-/new-form (旧字体↔新字体) data is derived from primary standards
-(常用漢字表〔内閣告示〕, 表外漢字字体表, 人名用漢字), not from any third-party
-table.
+3. 旧字体・異体字 → 新字体 mapping (joyo-kyujitai.tsv). The underlying data is
+   the 常用漢字表 (内閣告示, public domain); the machine-readable table is derived
+   from new-village/joyo-kanji (Apache-2.0,
+   https://github.com/new-village/joyo-kanji).
