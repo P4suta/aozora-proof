@@ -8,7 +8,12 @@
 
 #![forbid(unsafe_code)]
 
-// `static JIS_LEVELS: &[(u32, u8)]`, sorted by codepoint.
+use std::sync::OnceLock;
+
+// Generated tables, sorted by codepoint:
+//   static JIS_LEVELS: &[(u32, u8)]
+//   static KYUJI_TO_SHINJI: &[(u32, char)]
+//   static GAIJI_MENKUTEN: &[(u32, u8, u8, u8)]
 include!(concat!(env!("OUT_DIR"), "/jis_tables.rs"));
 
 /// JIS 水準 (level) classification of a character.
@@ -39,6 +44,18 @@ impl Suijun {
     #[must_use]
     pub const fn is_jisx0213_only(self) -> bool {
         matches!(self, Self::Level3 | Self::Level4)
+    }
+
+    /// Japanese label for the 水準 (`第1水準` … `第4水準` / `JIS X 0213外`).
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Level1 => "第1水準",
+            Self::Level2 => "第2水準",
+            Self::Level3 => "第3水準",
+            Self::Level4 => "第4水準",
+            Self::Outside => "JIS X 0213外",
+        }
     }
 }
 
@@ -87,6 +104,85 @@ pub fn shinji_for(c: char) -> Option<char> {
         .map(|i| KYUJI_TO_SHINJI[i].1)
 }
 
+/// A character's JIS X 0213 面区点 (plane-row-cell) position plus its 水準.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MenKuTen {
+    /// Plane (面): 1 or 2.
+    pub men: u8,
+    /// Row (区).
+    pub ku: u8,
+    /// Cell (点).
+    pub ten: u8,
+    /// The 水準 the cell belongs to.
+    pub level: Suijun,
+}
+
+/// The JIS X 0213 面区点 position (and 水準) of `c`, if it is a JIS X 0213
+/// character. The 外字注記 form is written `第N水準 men-ku-ten`.
+#[must_use]
+pub fn men_ku_ten(c: char) -> Option<MenKuTen> {
+    let cp = u32::from(c);
+    let i = GAIJI_MENKUTEN
+        .binary_search_by_key(&cp, |&(k, ..)| k)
+        .ok()?;
+    let (_, men, ku, ten) = GAIJI_MENKUTEN[i];
+    Some(MenKuTen {
+        men,
+        ku,
+        ten,
+        level: jis_level(c),
+    })
+}
+
+/// The character at JIS X 0213 面区点 `men`-`ku`-`ten`, if the cell is assigned.
+#[must_use]
+pub fn char_at_men_ku_ten(men: u8, ku: u8, ten: u8) -> Option<char> {
+    GAIJI_MENKUTEN
+        .iter()
+        .find(|&&(_, m, k, t)| m == men && k == ku && t == ten)
+        .and_then(|&(cp, ..)| char::from_u32(cp))
+}
+
+/// The vendored 外字注記辞書 (CC0), parsed once into (description, character).
+fn gaiji_dict() -> &'static [(&'static str, char)] {
+    static DICT: OnceLock<Vec<(&'static str, char)>> = OnceLock::new();
+    DICT.get_or_init(|| {
+        const RAW: &str = include_str!("../data/aozora-gaiji-chuki.tsv");
+        RAW.lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter_map(|line| {
+                let (desc, hex) = line.split_once('\t')?;
+                let cp = u32::from_str_radix(hex.trim(), 16).ok()?;
+                char::from_u32(cp).map(|c| (desc, c))
+            })
+            .collect()
+    })
+}
+
+/// The 外字注記 descriptions recorded for `c` (e.g. `弓＋椀のつくり`).
+#[must_use]
+pub fn gaiji_descriptions(c: char) -> Vec<&'static str> {
+    gaiji_dict()
+        .iter()
+        .filter(|&&(_, ch)| ch == c)
+        .map(|&(desc, _)| desc)
+        .collect()
+}
+
+/// Search the 外字注記辞書 for descriptions containing `query`, returning
+/// (description, character) pairs. An empty query returns nothing.
+#[must_use]
+pub fn gaiji_search(query: &str) -> Vec<(&'static str, char)> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    gaiji_dict()
+        .iter()
+        .filter(|&&(desc, _)| desc.contains(query))
+        .copied()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +203,29 @@ mod tests {
         assert_eq!(shinji_for('\u{4F86}'), Some('\u{6765}')); // 來 → 来
         assert_eq!(shinji_for('\u{4ECF}'), None); // 仏 is already 新字体
         assert_eq!(shinji_for('あ'), None);
+    }
+
+    #[test]
+    fn gaiji_men_ku_ten_roundtrip() {
+        // 俱 (U+4FF1) is at 3-2E21 → men 1, ku 14, ten 1, 第3水準.
+        let m = men_ku_ten('\u{4FF1}').expect("俱 is in JIS X 0213");
+        assert_eq!((m.men, m.ku, m.ten), (1, 14, 1));
+        assert_eq!(m.level, Suijun::Level3);
+        assert_eq!(char_at_men_ku_ten(1, 14, 1), Some('\u{4FF1}'));
+        assert_eq!(char_at_men_ku_ten(9, 9, 9), None);
+    }
+
+    #[test]
+    fn gaiji_dict_lookup_and_search() {
+        assert!(gaiji_search("").is_empty());
+        let descs = gaiji_descriptions('\u{20089}'); // has a 外字注記 description
+        assert!(!descs.is_empty());
+        // Searching for that description finds the same character back.
+        assert!(
+            gaiji_search(descs[0])
+                .iter()
+                .any(|&(_, c)| c == '\u{20089}')
+        );
     }
 
     #[test]
