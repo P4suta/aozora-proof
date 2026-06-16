@@ -45,6 +45,16 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
       - name: typos
         uses: crate-ci/typos@master
+      - name: lint tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: taplo@0.10.0, actionlint@1.7.12, shellcheck@0.11.0, biome@2.5.0
+      - name: taplo
+        run: taplo fmt --check && taplo lint
+      - name: actionlint
+        run: actionlint
+      - name: biome
+        run: biome ci web
 
   deny:
     name: deny

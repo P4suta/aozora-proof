@@ -4,8 +4,8 @@
 # (^0.9), so patch updates flow in automatically while the minor stays pinned
 # for local == CI parity. Blank lines and `#` comments are ignored.
 #
-# Keep these minors in step with the `tools:` versions in the CI composite
-# action (.github/actions/setup-rust). Bump together.
+# Keep these minors in step with the install-action versions in CI
+# (.github/actions/setup-rust and the `lint` job in .github/workflows/ci.yml).
 
 cargo-nextest@0.9      # test runner — CI's `test` job uses this
 cargo-deny@0.19        # supply-chain / license gate — CI's `deny` job
@@ -15,3 +15,8 @@ typos-cli@1.47         # spell check — CI's `lint` job
 bacon@3                # background watch loop (see bacon.toml)
 miniserve@0.35         # tiny static server for `just serve` / `just web`
 watchexec-cli@2.5      # file-watch trigger for `just web`
+taplo-cli@0.10         # TOML format + lint — CI's `lint` job
+
+# Non-cargo lint tools used by CI's `lint` job (installed there via
+# taiki-e/install-action): actionlint, shellcheck, biome. Install locally via
+# mise or your package manager; `just lint-actions` / `just lint-web` use them.

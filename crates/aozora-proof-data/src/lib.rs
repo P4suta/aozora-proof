@@ -7,6 +7,13 @@
 //! isolates the especially-non-portable 機種依存文字 band.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::indexing_slicing,
+        reason = "tests index results of asserted length"
+    )
+)]
 
 use std::sync::OnceLock;
 
@@ -65,7 +72,9 @@ pub fn jis_level(c: char) -> Suijun {
     let cp = u32::from(c);
     JIS_LEVELS
         .binary_search_by_key(&cp, |&(k, _)| k)
-        .map_or(Suijun::Outside, |i| match JIS_LEVELS[i].1 {
+        .ok()
+        .and_then(|i| JIS_LEVELS.get(i))
+        .map_or(Suijun::Outside, |&(_, level)| match level {
             1 => Suijun::Level1,
             2 => Suijun::Level2,
             3 => Suijun::Level3,
@@ -101,7 +110,8 @@ pub fn shinji_for(c: char) -> Option<char> {
     KYUJI_TO_SHINJI
         .binary_search_by_key(&u32::from(c), |&(k, _)| k)
         .ok()
-        .map(|i| KYUJI_TO_SHINJI[i].1)
+        .and_then(|i| KYUJI_TO_SHINJI.get(i))
+        .map(|&(_, shinji)| shinji)
 }
 
 /// A character's JIS X 0213 面区点 (plane-row-cell) position plus its 水準.
@@ -125,7 +135,7 @@ pub fn men_ku_ten(c: char) -> Option<MenKuTen> {
     let i = GAIJI_MENKUTEN
         .binary_search_by_key(&cp, |&(k, ..)| k)
         .ok()?;
-    let (_, men, ku, ten) = GAIJI_MENKUTEN[i];
+    let &(_, men, ku, ten) = GAIJI_MENKUTEN.get(i)?;
     Some(MenKuTen {
         men,
         ku,

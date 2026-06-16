@@ -17,8 +17,6 @@
 //! The map is **exact** for the deletion-based transforms (BOM strip,
 //! CRLF→LF). The `〔…〕` accent rewrite is a *substitution*, not a deletion;
 //! around such ranges the map degrades to a clamped best-effort offset.
-//! Making accents exact (by reimplementing Phase 0 with offset tracking, or
-//! by having `aozora` expose its own offset map) is a tracked follow-up.
 
 use aozora::pipeline::lexer::sanitize;
 
@@ -49,7 +47,7 @@ impl SpanMap {
             // Skip decoded bytes that sanitize deleted (BOM, CR) before this
             // sanitized byte. For a pure-deletion transform the bytes realign
             // exactly; for a substitution this clamps at the decoded end.
-            while d < dec.len() && dec[d] != sb {
+            while dec.get(d).is_some_and(|&b| b != sb) {
                 d += 1;
             }
             let pos = d.min(dec.len());
@@ -68,7 +66,7 @@ impl SpanMap {
     /// Offsets beyond the sanitized text clamp to the end sentinel.
     #[must_use]
     pub fn offset(&self, sanitized: u32) -> u32 {
-        let i = sanitized as usize;
+        let i = usize::try_from(sanitized).unwrap_or(usize::MAX);
         self.decoded_of_sanitized
             .get(i)
             .copied()

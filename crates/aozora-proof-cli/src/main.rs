@@ -135,7 +135,7 @@ enum Format {
     Human,
     Json,
     Short,
-    /// SARIF 2.1.0 — for GitHub code-scanning upload.
+    /// SARIF 2.1.0 — GitHub のコードスキャンへのアップロード用。
     Sarif,
 }
 
@@ -149,11 +149,11 @@ enum SeverityArg {
 /// When to colorize human-readable output.
 #[derive(Clone, Copy, ValueEnum)]
 enum ColorChoice {
-    /// Color only when stdout is a terminal and `NO_COLOR` is unset.
+    /// 端末出力かつ `NO_COLOR` が未設定のときだけ着色する。
     Auto,
-    /// Always color.
+    /// 常に着色する。
     Always,
-    /// Never color.
+    /// 着色しない。
     Never,
 }
 

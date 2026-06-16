@@ -30,7 +30,7 @@ doctor:
     echo "active rustc                       : ${active:-unknown}"
     [ "$pin" = "$active" ] || echo "  ⚠  active rustc differs from the pin — run 'rustup show' (unset RUSTUP_TOOLCHAIN if it is set)"
     echo "dev tools:"
-    for t in cargo-nextest cargo-deny cargo-llvm-cov wasm-pack typos bacon lefthook just; do
+    for t in cargo-nextest cargo-deny cargo-llvm-cov wasm-pack typos bacon lefthook just taplo actionlint shellcheck biome; do
       if command -v "$t" >/dev/null 2>&1; then
         ver=$("$t" --version 2>/dev/null | head -1)
         printf '  ✓ %-14s %s\n' "$t" "${ver:-installed}"
@@ -68,8 +68,11 @@ test-portable *ARGS:
     cargo test --workspace --all-targets {{ ARGS }}
     cargo test --workspace --doc
 
+# auto-format Rust, TOML, and web assets (taplo/biome skipped if not installed).
 fmt:
     cargo fmt --all
+    command -v taplo >/dev/null 2>&1 && taplo fmt || true
+    command -v biome >/dev/null 2>&1 && biome check --write web || true
 
 fmt-check:
     cargo fmt --all -- --check
@@ -86,11 +89,21 @@ deny:
 typos:
     typos
 
+# non-Rust lint gates (mirrors the steps in ci.yml's `lint` job).
+lint-toml:
+    taplo fmt --check && taplo lint
+
+lint-actions:
+    actionlint
+
+lint-web:
+    biome ci web
+
 cov:
     cargo llvm-cov --workspace --summary-only
 
 # everything CI's gating jobs run (test + lint + deny). Mirrors ci.yml.
-ci: fmt-check clippy test doc deny typos
+ci: fmt-check clippy test doc deny typos lint-toml lint-actions lint-web
     @echo "ci: gating checks passed (use 'just ci-full' to also run the coverage job)"
 
 # full CI parity — also reproduces the coverage job (ci.yml `coverage`).

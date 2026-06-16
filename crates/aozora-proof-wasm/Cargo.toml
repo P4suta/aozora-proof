@@ -8,8 +8,8 @@ repository.workspace   = true
 authors.workspace      = true
 keywords.workspace     = true
 categories.workspace   = true
-readme      = "README.md"
-description = "WASM façade over aozora-proof-core — wasm-bindgen + wasm-pack distribution for the static web app."
+readme                 = "README.md"
+description            = "WASM façade over aozora-proof-core — wasm-bindgen + wasm-pack distribution for the static web app."
 
 # Built into a `pkg/` directory via `wasm-pack build --target web --release`.
 # Host (cargo workspace) builds skip the wasm-bindgen exports unless the

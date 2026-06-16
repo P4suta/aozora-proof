@@ -1,5 +1,5 @@
 [package]
-name          = "aozora-proof-core"
+name                   = "aozora-proof-core"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -8,8 +8,8 @@ repository.workspace   = true
 authors.workspace      = true
 keywords.workspace     = true
 categories.workspace   = true
-readme      = "README.md"
-description = "Character-level proofreading engine for 青空文庫記法 (Aozora Bunko notation) text: JIS X 0208 conformance, 機種依存文字, 旧字体↔新字体, and gaiji lookup. Consumes the aozora parser for the notation level."
+readme                 = "README.md"
+description            = "Character-level proofreading engine for 青空文庫記法 (Aozora Bunko notation) text: JIS X 0208 conformance, 機種依存文字, 旧字体↔新字体, and gaiji lookup. Consumes the aozora parser for the notation level."
 
 [dependencies]
 aozora            = { workspace = true }

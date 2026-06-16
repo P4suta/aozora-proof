@@ -39,8 +39,7 @@ function renderFindings(text) {
   const bytes = new TextEncoder().encode(text);
   data.sort(
     (a, b) =>
-      (SEV[a.severity]?.order ?? 9) - (SEV[b.severity]?.order ?? 9) ||
-      a.span.start - b.span.start,
+      (SEV[a.severity]?.order ?? 9) - (SEV[b.severity]?.order ?? 9) || a.span.start - b.span.start,
   );
   for (const f of data) {
     const li = el("li", `finding ${f.severity}`);

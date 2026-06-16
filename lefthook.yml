@@ -26,6 +26,17 @@ pre-commit:
       run: cargo clippy --workspace --all-targets -- -D warnings
     typos:
       run: typos
+    taplo:
+      glob: "*.toml"
+      run: command -v taplo >/dev/null 2>&1 && taplo fmt {staged_files} || true
+      stage_fixed: true
+    biome:
+      glob: "web/**/*.{js,css}"
+      run: command -v biome >/dev/null 2>&1 && biome check --write {staged_files} || true
+      stage_fixed: true
+    actionlint:
+      glob: ".github/**/*.{yml,yaml}"
+      run: command -v actionlint >/dev/null 2>&1 && actionlint || true
 
 commit-msg:
   commands:
@@ -54,6 +65,12 @@ pre-push:
       run: typos
     deny:
       run: command -v cargo-deny >/dev/null && cargo deny --all-features --manifest-path Cargo.toml check || true
+    taplo:
+      run: if command -v taplo >/dev/null 2>&1; then taplo fmt --check && taplo lint; fi
+    biome:
+      run: if command -v biome >/dev/null 2>&1; then biome ci web; fi
+    actionlint:
+      run: if command -v actionlint >/dev/null 2>&1; then actionlint; fi
 
 # After pull / merge / checkout, warm the dependency cache (informational).
 post-merge:

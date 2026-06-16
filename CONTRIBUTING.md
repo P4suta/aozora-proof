@@ -28,7 +28,9 @@ $ just doctor         # verify your toolchain + tools match what CI pins
 
 Already have `just`? `just setup` alone does the same. The pieces are also
 available individually: `just setup-toolchain`, `just setup-tools`, `just hooks`.
-Tool versions are pinned in [`dev-tools.txt`](./dev-tools.txt).
+Cargo tool versions are pinned in [`dev-tools.txt`](./dev-tools.txt). The non-cargo
+lint tools (`actionlint`, `shellcheck`, `biome`) come from mise or your package
+manager; CI installs them via `taiki-e/install-action`.
 
 ## Development loop
 

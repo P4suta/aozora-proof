@@ -9,8 +9,7 @@
 //!
 //! The engine is pure: it takes `&str` / `&[u8]` and returns
 //! [`Finding`]s. It performs no I/O, forbids `unsafe`, and is WASM-clean,
-//! so the same logic drives the CLI, the static web app, and (in time)
-//! the `aozora-lsp` editor server.
+//! so the same logic drives the CLI and the static web app.
 //!
 //! ```
 //! use aozora_proof_core::{run_notation, serialize_findings};
@@ -21,14 +20,19 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::indexing_slicing,
+        reason = "tests index results of asserted length"
+    )
+)]
 
 pub mod coords;
 pub mod finding;
 pub mod pipeline;
 pub mod rules;
 
-// Per-tool check modules. Layout anchors only for now; filled in by
-// later milestones.
 pub mod gaiji_dict;
 pub mod kyuji;
 pub mod moji;

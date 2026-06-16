@@ -31,8 +31,7 @@ aozora-proof-wasm ──┘
 | `aozora-proof-cli`  | argument parsing, file I/O, output formatting | the only crate that touches the filesystem |
 | `aozora-proof-wasm` | `checkJson` / `gaijiSearchJson` / `schemaVersion` | wasm-bindgen exports gated on `cfg(target_arch = "wasm32")`; plain functions on host builds |
 
-The core stays pure so the *same* engine drives the CLI, the in-browser web app,
-and (in time) an editor/LSP server.
+The core stays pure so the *same* engine drives the CLI and the in-browser web app.
 
 ## The pipeline
 
@@ -44,8 +43,7 @@ and (in time) an editor/LSP server.
 3. **Notation layer** — hand the decoded text to the `aozora` parser and lift
    each diagnostic into a unified `Finding`.
 4. **Character layers** — `moji` (conformance) and `kyuji` (旧字体↔新字体) over
-   the decoded text. (`gaiji_dict` powers the reverse-lookup `gaiji`
-   subcommand; gaiji-as-a-check is a later milestone.)
+   the decoded text. (`gaiji_dict` powers the reverse-lookup `gaiji` subcommand.)
 
 Everything is merged into one `Report { findings, decoded }`, sorted by span, in
 a single **decoded** coordinate frame.
