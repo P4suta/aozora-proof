@@ -13,11 +13,10 @@ cargo-llvm-cov@0.8     # coverage — CI's `coverage` job
 wasm-pack@0.15         # builds the browser WASM package (web/ dev loop)
 typos-cli@1.47         # spell check — CI's `lint` job
 bacon@3                # background watch loop (see bacon.toml)
-miniserve@0.35         # tiny static server for `just serve` / `just web`
-watchexec-cli@2.5      # file-watch trigger for `just web`
+watchexec-cli@2.5      # rebuilds wasm on Rust changes for `just web`
 taplo-cli@0.10         # TOML format + lint — CI's `lint` job
 
-# Non-cargo lint tools used by CI's `lint` job: shellcheck and biome via
-# taiki-e/install-action, actionlint via a pinned release download. Install
-# locally via mise or your package manager; `just lint-actions` / `lint-web`
-# use them.
+# Non-cargo tools: shellcheck via taiki-e/install-action and actionlint via a
+# pinned release download (CI's `lint` job) — install locally via mise or your
+# package manager. The web app (`web/`) is a SvelteKit project: install Node 24+
+# and pnpm, then `pnpm -C web install` (or run `just lint-web`).

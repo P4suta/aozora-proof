@@ -30,7 +30,7 @@ doctor:
     echo "active rustc                       : ${active:-unknown}"
     [ "$pin" = "$active" ] || echo "  ⚠  active rustc differs from the pin — run 'rustup show' (unset RUSTUP_TOOLCHAIN if it is set)"
     echo "dev tools:"
-    for t in cargo-nextest cargo-deny cargo-llvm-cov wasm-pack typos bacon lefthook just taplo actionlint shellcheck biome; do
+    for t in cargo-nextest cargo-deny cargo-llvm-cov wasm-pack typos bacon lefthook just taplo actionlint shellcheck pnpm; do
       if command -v "$t" >/dev/null 2>&1; then
         ver=$("$t" --version 2>/dev/null | head -1)
         printf '  ✓ %-14s %s\n' "$t" "${ver:-installed}"
@@ -68,11 +68,11 @@ test-portable *ARGS:
     cargo test --workspace --all-targets {{ ARGS }}
     cargo test --workspace --doc
 
-# auto-format Rust, TOML, and web assets (taplo/biome skipped if not installed).
+# auto-format Rust, TOML, and web assets (taplo/pnpm skipped if not installed).
 fmt:
     cargo fmt --all
     command -v taplo >/dev/null 2>&1 && taplo fmt || true
-    command -v biome >/dev/null 2>&1 && biome check --write web || true
+    command -v pnpm >/dev/null 2>&1 && pnpm -C web run format || true
 
 fmt-check:
     cargo fmt --all -- --check
@@ -96,8 +96,12 @@ lint-toml:
 lint-actions:
     actionlint
 
-lint-web:
-    biome ci web
+# web app gate: build wasm, then prettier + eslint + svelte-check + prerender build.
+lint-web: wasm
+    pnpm -C web install --frozen-lockfile
+    pnpm -C web run lint
+    pnpm -C web run check
+    pnpm -C web run build
 
 cov:
     cargo llvm-cov --workspace --summary-only
@@ -112,19 +116,17 @@ ci-full: ci cov
 
 # ---- web app ---------------------------------------------------------------
 
-# build the browser WASM package into web/pkg (mirrors docs.yml exactly).
-wasm:
-    wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
+# install the web app's Node dependencies (Node 24+ and pnpm required).
+setup-web:
+    pnpm -C web install
 
-# serve the static web app at http://localhost:8080 (ES modules need HTTP).
+# build the browser WASM package into web/src/lib/pkg (mirrors docs.yml exactly).
+wasm:
+    wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/src/lib/pkg
+
+# run the SvelteKit dev server (Vite) at http://localhost:5173 with HMR.
 serve: wasm
-    #!/usr/bin/env bash
-    if command -v miniserve >/dev/null 2>&1; then
-        miniserve web --index index.html -p 8080
-    else
-        echo "miniserve not found (run 'just setup'); falling back to python http.server"
-        python3 -m http.server -d web 8080
-    fi
+    pnpm -C web run dev
 
 # live web dev loop: rebuild wasm on Rust changes while serving. Ctrl-C to stop.
 web:

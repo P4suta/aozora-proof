@@ -30,9 +30,10 @@ pre-commit:
       glob: "*.toml"
       run: command -v taplo >/dev/null 2>&1 && taplo fmt {staged_files} || true
       stage_fixed: true
-    biome:
-      glob: "web/**/*.{js,css}"
-      run: command -v biome >/dev/null 2>&1 && biome check --write {staged_files} || true
+    web-format:
+      root: "web/"
+      glob: "*.{js,ts,svelte,css,html,json}"
+      run: command -v pnpm >/dev/null 2>&1 && pnpm exec prettier --write {staged_files} || true
       stage_fixed: true
     actionlint:
       glob: ".github/**/*.{yml,yaml}"
@@ -67,8 +68,13 @@ pre-push:
       run: command -v cargo-deny >/dev/null && cargo deny --all-features --manifest-path Cargo.toml check || true
     taplo:
       run: if command -v taplo >/dev/null 2>&1; then taplo fmt --check && taplo lint; fi
-    biome:
-      run: if command -v biome >/dev/null 2>&1; then biome ci web; fi
+    web:
+      root: "web/"
+      run: |
+        if command -v pnpm >/dev/null 2>&1 && command -v wasm-pack >/dev/null 2>&1; then
+          wasm-pack build --target web --release ../crates/aozora-proof-wasm --out-dir src/lib/pkg
+          pnpm install --frozen-lockfile && pnpm run lint && pnpm run check
+        fi
     actionlint:
       run: if command -v actionlint >/dev/null 2>&1; then actionlint; fi
 

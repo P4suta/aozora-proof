@@ -29,8 +29,9 @@ $ just doctor         # verify your toolchain + tools match what CI pins
 Already have `just`? `just setup` alone does the same. The pieces are also
 available individually: `just setup-toolchain`, `just setup-tools`, `just hooks`.
 Cargo tool versions are pinned in [`dev-tools.txt`](./dev-tools.txt). The non-cargo
-lint tools (`actionlint`, `shellcheck`, `biome`) come from mise or your package
-manager; CI installs them via `taiki-e/install-action`.
+lint tools (`actionlint`, `shellcheck`) come from mise or your package manager;
+CI installs them via `taiki-e/install-action`. The web app (`web/`) is a SvelteKit
+project — install Node 24+ and `pnpm`, then `pnpm -C web install`.
 
 ## Development loop
 
@@ -47,8 +48,10 @@ $ just ci-full        # + the coverage job (full CI parity)
 `bacon nextest`) gives a fast watch loop. `just doctor` reports whether your
 local tools match the versions CI pins.
 
-Hacking on the **web app**? `just web` builds the WASM package and serves
-`web/` with live reload at <http://localhost:8080>.
+Hacking on the **web app**? After `pnpm -C web install`, `just serve` builds the
+WASM package and runs the SvelteKit dev server at <http://localhost:5173>; `just
+web` adds a watcher that rebuilds the WASM on Rust changes. `just lint-web` runs
+the full web gate (prettier + eslint + svelte-check + prerender build).
 
 ## Troubleshooting
 
@@ -61,8 +64,8 @@ Hacking on the **web app**? `just web` builds the WASM package and serves
   unset the linker `RUSTFLAGS` or install mold.
 - **Can't reproduce a CI failure locally** — `just ci-full` runs every CI job
   (nextest + lint + deny + coverage) in one shot.
-- **web app blank / "module" error** — the browser app must be served over
-  HTTP, not `file://`: use `just web` (build + serve + live reload).
+- **web app blank / "module" error** — run it through the dev server, not
+  `file://`: `pnpm -C web install` then `just serve` (Vite dev) or `just web`.
 
 ## Pull requests
 
