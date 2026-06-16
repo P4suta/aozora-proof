@@ -45,6 +45,22 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
       - name: typos
         uses: crate-ci/typos@master
+      - name: lint tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: taplo@0.10.0, shellcheck@0.11.0, biome@2.5.0
+      - name: install actionlint
+        # actionlint is not in install-action's manifest; fetch the pinned binary.
+        run: |
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: taplo
+        run: taplo fmt --check && taplo lint
+      - name: actionlint
+        run: actionlint
+      - name: biome
+        run: biome ci web
 
   deny:
     name: deny

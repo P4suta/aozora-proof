@@ -9,6 +9,11 @@
 //! Sources: the Project X0213 mapping table (`jisx0213-2004-std.txt`) and the
 //! 常用漢字表-derived `joyo-kyujitai.tsv`.
 
+#![allow(
+    clippy::expect_used,
+    reason = "build script: abort the build on missing or malformed build-time inputs"
+)]
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write as _;
@@ -41,15 +46,16 @@ fn parse_jis(text: &str) -> (LevelMap, MenKuTenMap) {
         let menku = fields.next().unwrap_or("");
         let ucs = fields.next().unwrap_or("");
 
-        let mb = menku.as_bytes();
-        if mb.len() != 6 || mb[1] != b'-' {
+        let [plane, b'-', _, _, _, _] = *menku.as_bytes() else {
             continue;
-        }
-        let plane = mb[0];
+        };
         if plane != b'3' && plane != b'4' {
             continue;
         }
-        let Ok(rrcc) = u16::from_str_radix(&menku[2..6], 16) else {
+        let Some(rrcc_hex) = menku.get(2..6) else {
+            continue;
+        };
+        let Ok(rrcc) = u16::from_str_radix(rrcc_hex, 16) else {
             continue;
         };
         let row = u8::try_from(rrcc >> 8).unwrap_or(0);

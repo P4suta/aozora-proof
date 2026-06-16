@@ -60,9 +60,10 @@ pub fn check(raw: &[u8]) -> Vec<Finding> {
 /// True if any LF byte is not immediately preceded by CR — i.e. the file uses
 /// (at least partly) bare LF rather than the CR+LF Aozora convention.
 fn has_lone_lf(raw: &[u8]) -> bool {
-    raw.iter()
-        .enumerate()
-        .any(|(i, &b)| b == b'\n' && (i == 0 || raw[i - 1] != b'\r'))
+    raw.first() == Some(&b'\n')
+        || raw
+            .windows(2)
+            .any(|w| matches!(w, [prev, b'\n'] if *prev != b'\r'))
 }
 
 #[cfg(test)]

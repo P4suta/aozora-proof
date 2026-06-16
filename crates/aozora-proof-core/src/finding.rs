@@ -169,8 +169,6 @@ impl Finding {
     }
 }
 
-// ---- wire projection -------------------------------------------------
-
 #[derive(Serialize)]
 struct SpanWire {
     start: u32,

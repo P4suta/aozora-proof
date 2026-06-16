@@ -44,6 +44,10 @@ pub fn gaiji_search_json(query: &str) -> String {
 /// The wire-format schema version (matches `aozora_proof_core::SCHEMA_VERSION`).
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(js_name = schemaVersion))]
 #[must_use]
+#[allow(
+    clippy::missing_const_for_fn,
+    reason = "#[wasm_bindgen] requires a non-const fn on wasm32"
+)]
 pub fn schema_version() -> u32 {
     aozora_proof_core::SCHEMA_VERSION
 }

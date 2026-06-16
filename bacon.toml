@@ -53,13 +53,5 @@ need_stdout = true
 # Rustdoc build with `--document-private-items` so the docs.yml CI
 # gate (intra-doc-link denial) reproduces locally.
 [jobs.doc]
-command = [
-    "cargo",
-    "doc",
-    "--workspace",
-    "--no-deps",
-    "--document-private-items",
-    "--color",
-    "always",
-]
+command     = ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--color", "always"]
 need_stdout = false

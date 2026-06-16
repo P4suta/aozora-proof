@@ -1,8 +1,8 @@
-//! Orchestration — combine the notation layer (the `aozora` parser) and the
-//! character layers (conformance / 旧字体↔新字体 / gaiji) into one [`Report`].
+//! Orchestration — combine the notation layer (the `aozora` parser) with the
+//! character layers (conformance + 旧字体↔新字体) into one [`Report`].
 //!
-//! [`run_all`] runs the notation layer plus the character-conformance and
-//! 旧字体↔新字体 layers over raw bytes; the gaiji layer attaches in a later milestone.
+//! [`run_all`] runs file-structure checks, the notation layer, and the
+//! character-conformance and 旧字体↔新字体 layers over raw bytes.
 
 use crate::coords::SpanMap;
 use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
@@ -30,9 +30,7 @@ impl Report {
 /// Run the notation layer over already-decoded UTF-8 `text`, projecting each
 /// `aozora` diagnostic into a unified [`Finding`] in decoded coordinates.
 ///
-/// This is the integration spine: it proves the parser dependency, the
-/// span-frame lift ([`SpanMap`]), and the wire superset all line up. The
-/// character layers are layered on top in later milestones.
+/// [`run_all`] adds the character layers on top.
 #[must_use]
 pub fn run_notation(text: &str) -> Vec<Finding> {
     let map = SpanMap::build(text);
@@ -88,7 +86,7 @@ pub fn run_all(raw: &[u8]) -> Report {
 
 /// Map the parser's `#[non_exhaustive]` severity into our owned enum,
 /// defaulting unknown future variants to the visible `Warning`.
-fn severity_from(s: aozora::Severity) -> Severity {
+const fn severity_from(s: aozora::Severity) -> Severity {
     match s {
         aozora::Severity::Error => Severity::Error,
         aozora::Severity::Note => Severity::Note,
@@ -100,7 +98,7 @@ fn severity_from(s: aozora::Severity) -> Severity {
 
 /// Map the parser's `#[non_exhaustive]` diagnostic source into our owned
 /// enum, defaulting unknown future variants to `Source`.
-fn source_from(s: aozora::DiagnosticSource) -> FindingSource {
+const fn source_from(s: aozora::DiagnosticSource) -> FindingSource {
     match s {
         aozora::DiagnosticSource::Internal => FindingSource::Internal,
         // `Source`, plus any future `#[non_exhaustive]` variant, is treated

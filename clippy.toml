@@ -1,7 +1,4 @@
-# ---------------------------------------------------------------------------
-# doc_markdown — domain terms that shouldn't need backticks in docs.
-# https://rust-lang.github.io/rust-clippy/master/index.html#doc_markdown
-# ---------------------------------------------------------------------------
+# doc_markdown: domain terms that need no backticks in docs.
 doc-valid-idents = [
     "..",
     "Aozora",
@@ -13,12 +10,13 @@ doc-valid-idents = [
     "CP932",
     "SARIF",
     "WASM",
+    "JS",
+    "TypeScript",
+    "NEC",
+    "IBM",
 ]
 
-# ---------------------------------------------------------------------------
-# Complexity thresholds — tighter than clippy's defaults so creeping
-# complexity is caught at the gate, not in review.
-# ---------------------------------------------------------------------------
+# Complexity thresholds — tighter than clippy's defaults.
 too-many-arguments-threshold   = 4
 too-many-lines-threshold       = 80
 cognitive-complexity-threshold = 18
@@ -27,26 +25,18 @@ max-fn-params-bools            = 1
 enum-variant-name-threshold    = 2
 enum-variant-size-threshold    = 256
 
-# ---------------------------------------------------------------------------
-# Baselines — matches the tight defaults used by mature Rust projects.
-# ---------------------------------------------------------------------------
-# MSRV — matches rust-toolchain.toml so clippy won't flag idioms we can't use.
 msrv = "1.95.0"
 
-# Tests may be expressive about failure; production code stays strict.
+# Tests may unwrap/expect/panic; production code stays strict.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests  = true
 
-# Pre-1.0: don't hold the API hostage to export-stability.
+# Pre-1.0: API is not export-stable yet.
 avoid-breaking-exported-api = false
 
-# Surface accidental by-value moves of fat structs during development.
 pass-by-value-size-limit = 128
 
-# ---------------------------------------------------------------------------
-# disallowed-methods — banned std calls that are bug-sources or wrong layer.
-# ---------------------------------------------------------------------------
 disallowed-methods = [
     { path = "std::mem::forget", reason = "leaks destructors; use `ManuallyDrop` or explicit drop" },
     { path = "std::env::set_var", reason = "races with other threads; wire via Options instead" },

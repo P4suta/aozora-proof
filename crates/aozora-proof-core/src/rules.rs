@@ -2,9 +2,9 @@
 //!
 //! The check modules emit stable, namespaced `code`s (e.g.
 //! `aozora::char::platform_dependent`). A `code` plus a one-line message tells
-//! an editor *what* tripped; this module attaches the rationale and a
-//! good/bad example so the CLI's `explain` subcommand (and, in time, the web
-//! app) can teach the rule rather than merely flag it.
+//! an editor *what* tripped; this module attaches the rationale and a good/bad
+//! example so the CLI's `explain` subcommand can teach the rule rather than
+//! merely flag it.
 //!
 //! Only the character-level codes this crate owns are documented here.
 //! Notation findings reuse the upstream parser's `aozora::lex::*` codes, which

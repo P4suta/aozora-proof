@@ -8,22 +8,22 @@ repository.workspace   = true
 authors.workspace      = true
 keywords.workspace     = true
 categories.workspace   = true
-readme      = "README.md"
-description = "The `aozora-proof` command-line proofreader for 青空文庫 text: character-level conformance checks plus the aozora parser's notation diagnostics, for local use and CI."
+readme                 = "README.md"
+description            = "The `aozora-proof` command-line proofreader for 青空文庫 text: character-level conformance checks plus the aozora parser's notation diagnostics, for local use and CI."
 
 [[bin]]
 name = "aozora-proof"
 path = "src/main.rs"
 
 [dependencies]
-aozora-proof-core = { workspace = true }
-anstyle           = { workspace = true }
-clap              = { workspace = true }
-clap_complete     = { workspace = true }
+aozora-proof-core     = { workspace = true }
+anstyle               = { workspace = true }
+clap                  = { workspace = true }
+clap_complete         = { workspace = true }
 notify                = { workspace = true }
 notify-debouncer-mini = { workspace = true }
-serde             = { workspace = true }
-serde_json        = { workspace = true }
+serde                 = { workspace = true }
+serde_json            = { workspace = true }
 
 [lints]
 workspace = true
