@@ -12,7 +12,9 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use aozora_proof_core::{Finding, FindingSource, Report, SCHEMA_VERSION, Severity, run_all};
+use aozora_proof_core::{
+    Finding, FindingSource, Report, SCHEMA_VERSION, Severity, Suggestion, run_all,
+};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -49,6 +51,14 @@ struct CheckArgs {
     /// この深刻度以上を検出したら異常終了する。
     #[arg(long, value_enum, default_value_t = SeverityArg::Error)]
     fail_on: SeverityArg,
+
+    /// 旧字体→新字体の置換候補をプレビューする（書き込まない）。
+    #[arg(long, conflicts_with = "fix")]
+    diff: bool,
+
+    /// 旧字体→新字体の置換を適用してファイルに書き戻す（UTF-8 で出力）。
+    #[arg(long)]
+    fix: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -94,6 +104,10 @@ fn run_check(args: &CheckArgs) -> ExitCode {
                 read_error = true;
             }
         }
+    }
+
+    if args.fix || args.diff {
+        return run_fix(&results, args, read_error);
     }
 
     match resolve_format(args.format) {
@@ -308,4 +322,65 @@ const fn sev_rank_arg(severity: SeverityArg) -> u8 {
         SeverityArg::Warning => 2,
         SeverityArg::Note => 1,
     }
+}
+
+/// `--diff` / `--fix`: preview or apply the 旧字体→新字体 replacement suggestions.
+fn run_fix(results: &[(String, Report)], args: &CheckArgs, read_error: bool) -> ExitCode {
+    let mut total = 0usize;
+    for (label, report) in results {
+        let subs: Vec<&Suggestion> = report
+            .findings
+            .iter()
+            .filter_map(|f| f.suggestion.as_ref())
+            .collect();
+        if subs.is_empty() {
+            continue;
+        }
+        total += subs.len();
+        if args.diff {
+            println!("{label}:");
+            for s in &subs {
+                let (line, col) = line_col(&report.decoded, s.span.start);
+                println!("  {line}:{col}  {}", s.label);
+            }
+        } else {
+            let fixed = apply_suggestions(&report.decoded, &subs);
+            if label == "<stdin>" {
+                print!("{fixed}");
+            } else if let Err(err) = fs::write(label, &fixed) {
+                eprintln!("aozora-proof: {label}: {err}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    if args.fix {
+        eprintln!("aozora-proof: applied {total} replacement(s) (written as UTF-8)");
+    } else {
+        eprintln!("aozora-proof: {total} suggested replacement(s)");
+    }
+    if read_error {
+        ExitCode::from(2)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Apply replacement suggestions to `decoded`, right-to-left so earlier byte
+/// offsets stay valid as later spans are replaced.
+fn apply_suggestions(decoded: &str, subs: &[&Suggestion]) -> String {
+    let mut ordered: Vec<&Suggestion> = subs.to_vec();
+    ordered.sort_by_key(|s| core::cmp::Reverse(s.span.start));
+    let mut text = decoded.to_owned();
+    for s in ordered {
+        let start = usize::try_from(s.span.start).unwrap_or(usize::MAX);
+        let end = usize::try_from(s.span.end).unwrap_or(usize::MAX);
+        if start <= end
+            && end <= text.len()
+            && text.is_char_boundary(start)
+            && text.is_char_boundary(end)
+        {
+            text.replace_range(start..end, &s.replacement);
+        }
+    }
+    text
 }

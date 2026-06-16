@@ -110,6 +110,28 @@ fn main() {
     }
     out.push_str("];\n");
 
+    // 旧字体・異体字 → 新字体 (derived from the 常用漢字表). One new form per old.
+    let kyuji_src = Path::new(&manifest).join("data/joyo-kyujitai.tsv");
+    println!("cargo::rerun-if-changed=data/joyo-kyujitai.tsv");
+    let kyuji_text = fs::read_to_string(&kyuji_src).expect("read joyo-kyujitai.tsv");
+    let mut kyuji: BTreeMap<u32, u32> = BTreeMap::new();
+    for line in kyuji_text.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut cols = line.split('\t');
+        let old = cols.next().and_then(|s| s.chars().next());
+        let new = cols.next().and_then(|s| s.chars().next());
+        if let (Some(old), Some(new)) = (old, new) {
+            kyuji.insert(u32::from(old), u32::from(new));
+        }
+    }
+    out.push_str("static KYUJI_TO_SHINJI: &[(u32, char)] = &[\n");
+    for (old, new) in &kyuji {
+        writeln!(out, "    ({old:#06x}, '\\u{{{new:04x}}}'),").expect("write to String");
+    }
+    out.push_str("];\n");
+
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR set");
     let dest = Path::new(&out_dir).join("jis_tables.rs");
     fs::write(&dest, out).expect("write jis_tables.rs");
