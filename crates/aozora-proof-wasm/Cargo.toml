@@ -1,0 +1,37 @@
+[package]
+name                   = "aozora-proof-wasm"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+keywords.workspace     = true
+categories.workspace   = true
+readme      = "README.md"
+description = "WASM façade over aozora-proof-core — wasm-bindgen + wasm-pack distribution for the static web app."
+
+# Built into a `pkg/` directory via `wasm-pack build --target web --release`.
+# Host (cargo workspace) builds skip the wasm-bindgen exports unless the
+# wasm32 target is selected, compiling to plain functions.
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+aozora-proof-core = { workspace = true }
+serde_json        = { workspace = true }
+
+# wasm-bindgen is pulled in only when targeting wasm32, so host builds of the
+# workspace skip it and compile the exports as plain functions.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[lints]
+workspace = true
+
+# Bypass wasm-pack's bundled wasm-opt (its binaryen build can't validate the
+# bulk-memory opcodes Rust 1.95+ emits); optimise externally if needed.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

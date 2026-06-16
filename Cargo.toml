@@ -4,6 +4,7 @@ members = [
     "crates/aozora-proof-core",
     "crates/aozora-proof-data",
     "crates/aozora-proof-cli",
+    "crates/aozora-proof-wasm",
 ]
 
 [workspace.package]

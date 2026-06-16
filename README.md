@@ -74,8 +74,13 @@ repos:
 | crate | role |
 |---|---|
 | `aozora-proof-core` | the engine — pure, `forbid(unsafe)`, WASM-clean; `&str` / `&[u8]` → findings |
-| `aozora-proof-data` | character-classification tables (JIS 水準, 機種依存文字), baked at build time |
+| `aozora-proof-data` | character-classification tables (JIS 水準, 機種依存文字, 旧字体, gaiji), baked at build time |
 | `aozora-proof-cli`  | the `aozora-proof` binary |
+| `aozora-proof-wasm` | wasm-bindgen façade powering the in-browser web app (`web/`) |
+
+A static **web app** (`web/`) runs the checks in the browser — paste text to see
+findings plus 外字 search — published to
+[GitHub Pages](https://p4suta.github.io/aozora-proof/).
 
 ## License
 

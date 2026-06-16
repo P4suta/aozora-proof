@@ -23,16 +23,26 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - name: rustdoc
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - name: Build wasm package (→ web/pkg)
+        run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
+      - name: Build rustdoc
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
-      - name: Redirect index → aozora_proof_core
-        run: echo '<meta http-equiv="refresh" content="0; url=aozora_proof_core/index.html">' > target/doc/index.html
+      - name: Assemble site (web app at root, rustdoc under /api/)
+        run: |
+          mkdir -p web/api
+          cp -r target/doc/. web/api/
+          printf '<meta http-equiv="refresh" content="0; url=aozora_proof_core/index.html">' > web/api/index.html
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: target/doc
+          path: web
 
   deploy:
     needs: build
