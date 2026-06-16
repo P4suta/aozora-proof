@@ -17,6 +17,7 @@ miniserve@0.35         # tiny static server for `just serve` / `just web`
 watchexec-cli@2.5      # file-watch trigger for `just web`
 taplo-cli@0.10         # TOML format + lint — CI's `lint` job
 
-# Non-cargo lint tools used by CI's `lint` job (installed there via
-# taiki-e/install-action): actionlint, shellcheck, biome. Install locally via
-# mise or your package manager; `just lint-actions` / `just lint-web` use them.
+# Non-cargo lint tools used by CI's `lint` job: shellcheck and biome via
+# taiki-e/install-action, actionlint via a pinned release download. Install
+# locally via mise or your package manager; `just lint-actions` / `lint-web`
+# use them.
