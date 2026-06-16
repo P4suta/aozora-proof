@@ -3,6 +3,8 @@
 Thanks for your interest! This is a small, focused FOSS project; contributions
 of all sizes are welcome.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
+
 ## Ground rules
 
 - **Host toolchain.** Everything runs on host `cargo` — no Docker required. The
@@ -43,6 +45,9 @@ $ just ci-full        # + the coverage job (full CI parity)
 `bacon nextest`) gives a fast watch loop. `just doctor` reports whether your
 local tools match the versions CI pins.
 
+Hacking on the **web app**? `just web` builds the WASM package and serves
+`web/` with live reload at <http://localhost:8080>.
+
 ## Troubleshooting
 
 - **clippy/fmt passes locally but fails in CI** — your `rustc` may differ from
@@ -54,6 +59,8 @@ local tools match the versions CI pins.
   unset the linker `RUSTFLAGS` or install mold.
 - **Can't reproduce a CI failure locally** — `just ci-full` runs every CI job
   (nextest + lint + deny + coverage) in one shot.
+- **web app blank / "module" error** — the browser app must be served over
+  HTTP, not `file://`: use `just web` (build + serve + live reload).
 
 ## Pull requests
 

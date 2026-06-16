@@ -39,7 +39,8 @@ doctor:
       fi
     done
     if command -v mold >/dev/null 2>&1; then echo "  ✓ mold (optional, faster linking)"; else echo "  · mold not found (optional; see .cargo/config.toml)"; fi
-    if [ -f .git/hooks/pre-commit ]; then echo "  ✓ git hooks installed"; else echo "  ✗ git hooks not installed — run: just hooks"; fi
+    hookdir=$(git config core.hooksPath 2>/dev/null); [ -n "$hookdir" ] || hookdir=$(git rev-parse --git-path hooks 2>/dev/null); [ -n "$hookdir" ] || hookdir=.git/hooks
+    if [ -f "$hookdir/pre-commit" ]; then echo "  ✓ git hooks installed"; else echo "  ✗ git hooks not installed — run: just hooks"; fi
 
 # ---- inner loop ------------------------------------------------------------
 
@@ -95,6 +96,31 @@ ci: fmt-check clippy test doc deny typos
 # full CI parity — also reproduces the coverage job (ci.yml `coverage`).
 ci-full: ci cov
     @echo "ci-full: all CI jobs reproduced locally"
+
+# ---- web app ---------------------------------------------------------------
+
+# build the browser WASM package into web/pkg (mirrors docs.yml exactly).
+wasm:
+    wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
+
+# serve the static web app at http://localhost:8080 (ES modules need HTTP).
+serve: wasm
+    #!/usr/bin/env bash
+    if command -v miniserve >/dev/null 2>&1; then
+        miniserve web --index index.html -p 8080
+    else
+        echo "miniserve not found (run 'just setup'); falling back to python http.server"
+        python3 -m http.server -d web 8080
+    fi
+
+# live web dev loop: rebuild wasm on Rust changes while serving. Ctrl-C to stop.
+web:
+    #!/usr/bin/env bash
+    command -v watchexec >/dev/null 2>&1 || { echo "watchexec missing — run 'just setup'"; exit 1; }
+    watchexec --postpone --restart --watch crates --exts rs -- just wasm &
+    watcher=$!
+    trap 'kill $watcher 2>/dev/null' EXIT
+    just serve
 
 # install the lefthook git hooks
 hooks:

@@ -22,13 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-pack
+          tools: wasm-pack@0.15
       - name: Build wasm package (→ web/pkg)
         run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
       - name: Build rustdoc

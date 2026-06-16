@@ -8,7 +8,7 @@
 </p>
 
 A modern, FOSS proofreading toolkit for **青空文庫記法 (Aozora Bunko notation)**
-text — built to run locally, in **CI**, and (later) as a static web app.
+text — built to run locally, in **CI**, and in the browser as a static web app.
 
 `aozora-proof` checks the **character level** of a manuscript — the layer the
 [`aozora`](https://github.com/P4suta/aozora) parser deliberately leaves alone —
@@ -81,6 +81,11 @@ repos:
 A static **web app** (`web/`) runs the checks in the browser — paste text to see
 findings plus 外字 search — published to
 [GitHub Pages](https://p4suta.github.io/aozora-proof/).
+
+## Develop
+
+`./bootstrap.sh` provisions the toolchain and dev tools; `just --list` shows
+every task. See [CONTRIBUTING](CONTRIBUTING.md) and [ARCHITECTURE](ARCHITECTURE.md).
 
 ## License
 
