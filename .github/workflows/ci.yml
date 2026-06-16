@@ -46,9 +46,10 @@ jobs:
       - name: typos
         uses: crate-ci/typos@master
       - name: lint tools
+        # actionlint unversioned: install-action's manifest can lag its releases.
         uses: taiki-e/install-action@v2
         with:
-          tool: taplo@0.10.0, actionlint@1.7.12, shellcheck@0.11.0, biome@2.5.0
+          tool: taplo@0.10.0, actionlint, shellcheck@0.11.0, biome@2.5.0
       - name: taplo
         run: taplo fmt --check && taplo lint
       - name: actionlint
