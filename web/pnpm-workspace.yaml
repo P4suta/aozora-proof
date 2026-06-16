@@ -1,3 +1,8 @@
 allowBuilds:
   '@tailwindcss/oxide': true
   esbuild: true
+
+# Force the patched cookie (SvelteKit pulls ^0.6.0; 0.6.0 has GHSA-pxg6-pf52-xh8x).
+# 0.7.x is API-compatible with kit's parse/serialize usage.
+overrides:
+  cookie: '^0.7.0'
