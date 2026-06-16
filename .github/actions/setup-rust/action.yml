@@ -1,0 +1,30 @@
+name: setup-rust
+description: Pinned Rust toolchain + mold + cargo cache (+ optional tools), shared by every CI job.
+
+inputs:
+  components:
+    description: 'Comma-separated rustup components, e.g. "rustfmt, clippy".'
+    required: false
+    default: ""
+  targets:
+    description: 'Comma-separated rustup targets, e.g. "wasm32-unknown-unknown".'
+    required: false
+    default: ""
+  tools:
+    description: 'Comma-separated cargo tools for taiki-e/install-action, e.g. "cargo-nextest@0.9". Pin to dev-tools.txt.'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@1.95.0
+      with:
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+    - uses: rui314/setup-mold@v1
+    - uses: Swatinem/rust-cache@v2
+    - if: ${{ inputs.tools != '' }}
+      uses: taiki-e/install-action@v2
+      with:
+        tool: ${{ inputs.tools }}

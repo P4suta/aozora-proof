@@ -8,7 +8,7 @@
 </p>
 
 A modern, FOSS proofreading toolkit for **青空文庫記法 (Aozora Bunko notation)**
-text — built to run locally, in **CI**, and (later) as a static web app.
+text — built to run locally, in **CI**, and in the browser as a static web app.
 
 `aozora-proof` checks the **character level** of a manuscript — the layer the
 [`aozora`](https://github.com/P4suta/aozora) parser deliberately leaves alone —
@@ -33,6 +33,9 @@ $ aozora-proof check seihon.txt
 $ cat seihon.txt | aozora-proof check -
 $ aozora-proof check --format json *.txt          # machine-readable, for CI
 $ aozora-proof check --fail-on warning chapter*.txt
+$ aozora-proof check --watch draft.txt            # re-check on every save
+$ aozora-proof explain aozora::char::platform_dependent   # why a code fired
+$ aozora-proof completions zsh > ~/.zfunc/_aozora-proof   # shell completions
 ```
 
 Exit codes: `0` clean · `1` findings (`--strict`, or at/above `--fail-on`) ·
@@ -81,6 +84,11 @@ repos:
 A static **web app** (`web/`) runs the checks in the browser — paste text to see
 findings plus 外字 search — published to
 [GitHub Pages](https://p4suta.github.io/aozora-proof/).
+
+## Develop
+
+`./bootstrap.sh` provisions the toolchain and dev tools; `just --list` shows
+every task. See [CONTRIBUTING](CONTRIBUTING.md) and [ARCHITECTURE](ARCHITECTURE.md).
 
 ## License
 

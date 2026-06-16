@@ -3,11 +3,12 @@
 The WASM façade over [`aozora-proof-core`](../aozora-proof-core), for the static
 web app.
 
-Build the browser package:
+Build the browser package (writes to `web/pkg/`, where the `web/` app loads it):
 
 ```console
-$ wasm-pack build --target web --release crates/aozora-proof-wasm
-# → crates/aozora-proof-wasm/pkg/  (ES module + .wasm)
+$ just wasm
+# equivalently:
+$ wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
 ```
 
 Exports: `checkJson(text)` (the `{schema_version,data}` findings envelope),

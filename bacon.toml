@@ -38,9 +38,16 @@ need_stdout = false
 
 # Full workspace test suite. Plain `cargo test` (not nextest) so this
 # config works without the cargo-nextest binary installed locally —
-# CI uses nextest separately.
+# CI uses nextest separately (see the `nextest` job below for exact parity).
 [jobs.test]
 command     = ["cargo", "test", "--workspace", "--all-targets", "--color", "always"]
+need_stdout = true
+
+# Exact CI parity: runs the suite through cargo-nextest, matching the
+# `test` job in ci.yml. Needs the cargo-nextest binary (`just setup`).
+# Launch with `bacon nextest`.
+[jobs.nextest]
+command     = ["cargo", "nextest", "run", "--workspace", "--all-targets", "--color", "always"]
 need_stdout = true
 
 # Rustdoc build with `--document-private-items` so the docs.yml CI

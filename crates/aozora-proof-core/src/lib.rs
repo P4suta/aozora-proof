@@ -25,6 +25,7 @@
 pub mod coords;
 pub mod finding;
 pub mod pipeline;
+pub mod rules;
 
 // Per-tool check modules. Layout anchors only for now; filled in by
 // later milestones.
@@ -36,3 +37,4 @@ pub use finding::{
     Finding, FindingSource, Origin, SCHEMA_VERSION, Severity, Span, Suggestion, serialize_findings,
 };
 pub use pipeline::{Report, run_all, run_notation};
+pub use rules::{RuleDoc, all_rules, explain};

@@ -21,12 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.95.0
-      - uses: rui314/setup-mold@v1
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: ./.github/actions/setup-rust
         with:
-          tool: cargo-nextest
+          tools: cargo-nextest@0.9
       - run: cargo nextest run --workspace --all-targets
       - run: cargo test --workspace --doc
 
@@ -35,11 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
-      - uses: rui314/setup-mold@v1
-      - uses: Swatinem/rust-cache@v2
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
@@ -63,12 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           components: llvm-tools-preview
-      - uses: rui314/setup-mold@v1
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
+          tools: cargo-llvm-cov@0.8
       - run: cargo llvm-cov --workspace --summary-only
