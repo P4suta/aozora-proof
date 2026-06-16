@@ -19,6 +19,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    # `dtolnay/rust-toolchain@<version>` uses the `@version` as the *toolchain*
+    # selector, not an action release tag — Dependabot would otherwise "bump"
+    # it to a nonexistent Rust version. The toolchain is pinned manually.
+    ignore:
+      - dependency-name: "dtolnay/rust-toolchain"
     groups:
       actions:
         patterns: ["*"]
