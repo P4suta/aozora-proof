@@ -17,7 +17,9 @@ path = "src/main.rs"
 
 [dependencies]
 aozora-proof-core = { workspace = true }
+anstyle           = { workspace = true }
 clap              = { workspace = true }
+clap_complete     = { workspace = true }
 serde             = { workspace = true }
 serde_json        = { workspace = true }
 

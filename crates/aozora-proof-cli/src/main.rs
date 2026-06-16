@@ -12,21 +12,42 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use anstyle::{AnsiColor, Style};
 use aozora_proof_core::gaiji_dict::{self, GaijiInfo};
 use aozora_proof_core::{
-    Finding, FindingSource, Report, SCHEMA_VERSION, Severity, Suggestion, run_all,
+    Finding, FindingSource, Report, RuleDoc, SCHEMA_VERSION, Severity, Suggestion, all_rules,
+    explain, run_all,
 };
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
+
+/// Long version string (crate version + git SHA + date + target), set by build.rs.
+const LONG_VERSION: &str = env!("AOZORA_PROOF_LONG_VERSION");
+
+/// Usage examples appended to the top-level `--help`.
+const AFTER_HELP: &str = "\
+例:
+  aozora-proof check seihon.txt              # 1ファイルを校正
+  cat seihon.txt | aozora-proof check -      # 標準入力から
+  aozora-proof check --format json *.txt     # CI 向け JSON
+  aozora-proof check --fix old.txt           # 旧字体→新字体を適用して書き戻す
+  aozora-proof explain aozora::char::platform_dependent
+  aozora-proof completions zsh > _aozora-proof";
 
 #[derive(Parser)]
 #[command(
     name = "aozora-proof",
-    version,
-    about = "青空文庫記法テキストの文字レベル校正ツール（JIS 適合・旧字体/新字体・外字参照）"
+    version = LONG_VERSION,
+    about = "青空文庫記法テキストの文字レベル校正ツール（JIS 適合・旧字体/新字体・外字参照）",
+    after_help = AFTER_HELP
 )]
 struct Cli {
     #[command(subcommand)]
     command: Command,
+
+    /// 配色。auto は端末のみ着色（`NO_COLOR` を尊重）。
+    #[arg(long, value_enum, global = true, default_value_t = ColorChoice::Auto)]
+    color: ColorChoice,
 }
 
 #[derive(Subcommand)]
@@ -35,6 +56,16 @@ enum Command {
     Check(CheckArgs),
     /// 外字（gaiji）を参照・検索する（注記 ⇔ 文字 ⇔ 面区点 ⇔ Unicode）。
     Gaiji(GaijiArgs),
+    /// 指摘コードの理由・例・直し方を表示する。
+    Explain {
+        /// 説明するコード（例: `aozora::char::platform_dependent`）。
+        code: String,
+    },
+    /// シェル補完スクリプトを生成する（bash / zsh / fish / powershell / elvish）。
+    Completions {
+        /// 対象シェル。
+        shell: Shell,
+    },
 }
 
 #[derive(Args)]
@@ -103,15 +134,110 @@ enum SeverityArg {
     Note,
 }
 
+/// When to colorize human-readable output.
+#[derive(Clone, Copy, ValueEnum)]
+enum ColorChoice {
+    /// Color only when stdout is a terminal and `NO_COLOR` is unset.
+    Auto,
+    /// Always color.
+    Always,
+    /// Never color.
+    Never,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let painter = Painter::resolve(cli.color);
     match cli.command {
-        Command::Check(args) => run_check(&args),
-        Command::Gaiji(args) => run_gaiji(&args),
+        Command::Check(args) => run_check(&args, painter),
+        Command::Gaiji(args) => run_gaiji(&args, painter),
+        Command::Explain { code } => run_explain(&code, painter),
+        Command::Completions { shell } => run_completions(shell),
     }
 }
 
-fn run_check(args: &CheckArgs) -> ExitCode {
+/// Decides whether to emit ANSI color and applies styles accordingly.
+#[derive(Clone, Copy, Debug)]
+struct Painter {
+    enabled: bool,
+}
+
+impl Painter {
+    /// Resolve from `--color`, honoring `NO_COLOR` and TTY detection.
+    fn resolve(choice: ColorChoice) -> Self {
+        let enabled = match choice {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto => {
+                std::env::var_os("NO_COLOR").is_none() && io::stdout().is_terminal()
+            }
+        };
+        Self { enabled }
+    }
+
+    /// Wrap `text` in `style` when color is enabled, else return it unstyled.
+    fn paint(self, style: Style, text: &str) -> String {
+        if self.enabled {
+            format!("{}{text}{}", style.render(), style.render_reset())
+        } else {
+            text.to_owned()
+        }
+    }
+}
+
+/// Bold, colored style for a severity badge (error=red, warning=yellow, note=blue).
+fn severity_style(severity: Severity) -> Style {
+    let color = match severity {
+        Severity::Error => AnsiColor::Red,
+        Severity::Warning => AnsiColor::Yellow,
+        Severity::Note => AnsiColor::Blue,
+    };
+    Style::new().bold().fg_color(Some(color.into()))
+}
+
+/// `explain <code>`: print a rule's rationale, examples, and fix.
+fn run_explain(code: &str, painter: Painter) -> ExitCode {
+    match explain(code) {
+        Some(doc) => {
+            print_rule_doc(&doc, painter);
+            ExitCode::SUCCESS
+        }
+        None if code.starts_with("aozora::lex::") => {
+            println!("{code} は aozora パーサの記法診断コードです。");
+            println!("記法レベルの詳細は aozora のドキュメントを参照してください。");
+            ExitCode::SUCCESS
+        }
+        None => {
+            eprintln!("aozora-proof: 未知のコード: {code}");
+            eprintln!("説明できるコード:");
+            for rule in all_rules() {
+                eprintln!("  {}", rule.code);
+            }
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn print_rule_doc(doc: &RuleDoc, painter: Painter) {
+    let title = painter.paint(Style::new().bold(), doc.title);
+    let code = painter.paint(Style::new().dimmed(), doc.code);
+    println!("{title}  [{code}]");
+    println!();
+    println!("理由  : {}", doc.rationale);
+    println!("悪い例: {}", doc.example_bad);
+    println!("良い例: {}", doc.example_good);
+    println!("直し方: {}", doc.fix);
+}
+
+/// `completions <shell>`: write a shell completion script to stdout.
+fn run_completions(shell: Shell) -> ExitCode {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_owned();
+    clap_complete::generate(shell, &mut cmd, name, &mut io::stdout());
+    ExitCode::SUCCESS
+}
+
+fn run_check(args: &CheckArgs, painter: Painter) -> ExitCode {
     let mut results: Vec<(String, Report)> = Vec::new();
     let mut read_error = false;
 
@@ -140,7 +266,7 @@ fn run_check(args: &CheckArgs) -> ExitCode {
         Format::Json => print_json(&results),
         Format::Short => print_short(&results),
         Format::Sarif => print_sarif(&results),
-        Format::Human | Format::Auto => print_human(&results),
+        Format::Human | Format::Auto => print_human(&results, painter),
     }
 
     decide_exit(&results, args, read_error)
@@ -204,27 +330,30 @@ fn print_short(results: &[(String, Report)]) {
     }
 }
 
-fn print_human(results: &[(String, Report)]) {
+fn print_human(results: &[(String, Report)], painter: Painter) {
     let mut total = 0usize;
     for (label, report) in results {
         if report.findings.is_empty() {
             continue;
         }
-        println!("{label}:");
+        println!(
+            "{}",
+            painter.paint(Style::new().bold(), &format!("{label}:"))
+        );
         for finding in &report.findings {
             let (line, col) = line_col(&report.decoded, finding.span.start);
-            println!(
-                "  {line}:{col}  {:7}  {}  {}",
-                finding.severity.as_wire_str(),
-                finding.code,
-                finding.message
-            );
+            // Pad the badge before styling so ANSI codes don't break alignment.
+            let badge = format!("{:7}", finding.severity.as_wire_str());
+            let badge = painter.paint(severity_style(finding.severity), &badge);
+            let code = painter.paint(Style::new().dimmed(), finding.code);
+            println!("  {line}:{col}  {badge}  {code}  {}", finding.message);
             total += 1;
         }
         println!();
     }
     if total == 0 {
-        println!("✓ 問題は見つかりませんでした。");
+        let style = Style::new().bold().fg_color(Some(AnsiColor::Green.into()));
+        println!("{}", painter.paint(style, "✓ 問題は見つかりませんでした。"));
     } else {
         println!("{total} 件の指摘が見つかりました。");
     }
@@ -411,7 +540,7 @@ fn apply_suggestions(decoded: &str, subs: &[&Suggestion]) -> String {
     text
 }
 
-fn run_gaiji(args: &GaijiArgs) -> ExitCode {
+fn run_gaiji(args: &GaijiArgs, painter: Painter) -> ExitCode {
     let json = matches!(resolve_format(args.format), Format::Json);
 
     if let Some(query) = &args.search {
@@ -460,7 +589,7 @@ fn run_gaiji(args: &GaijiArgs) -> ExitCode {
             ExitCode::from(1)
         },
         |ch| {
-            print_gaiji_info(&gaiji_dict::lookup(ch), json);
+            print_gaiji_info(&gaiji_dict::lookup(ch), json, painter);
             ExitCode::SUCCESS
         },
     )
@@ -487,7 +616,7 @@ fn parse_unicode(s: &str) -> Option<char> {
     u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
 }
 
-fn print_gaiji_info(info: &GaijiInfo, json: bool) {
+fn print_gaiji_info(info: &GaijiInfo, json: bool, painter: Painter) {
     if json {
         let men_ku_ten = info.men_ku_ten.map(|m| {
             serde_json::json!({ "men": m.men, "ku": m.ku, "ten": m.ten, "level": m.level.label() })
@@ -504,7 +633,8 @@ fn print_gaiji_info(info: &GaijiInfo, json: bool) {
             serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_owned())
         );
     } else {
-        println!("文字: {}  (U+{:04X})", info.character, info.codepoint);
+        let ch = painter.paint(Style::new().bold(), &info.character.to_string());
+        println!("文字: {ch}  (U+{:04X})", info.codepoint);
         match info.men_ku_ten {
             Some(m) => println!(
                 "面区点: {}-{}-{}  ({})",
