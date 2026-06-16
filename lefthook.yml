@@ -1,0 +1,69 @@
+# aozora-proof — strict lefthook hooks (pre-commit / commit-msg / pre-push /
+# post-merge / post-checkout). Runs straight on the host (cargo + typos).
+#
+# Enable after clone:  `lefthook install`
+# Disable:             `lefthook uninstall`
+#
+# Strictness policy:
+# - pre-commit is the gentle pass: format-and-restage, deny obvious mistakes.
+# - pre-push is the strict gate: no writes; every check that can run locally
+#   runs here. If anything fails, the push is blocked.
+#
+# Reference: https://lefthook.dev/configuration/
+
+pre-commit:
+  parallel: true
+  skip:
+    - rebase
+    - merge
+  commands:
+    rust-fmt:
+      glob: "*.rs"
+      run: cargo fmt --all
+      stage_fixed: true
+    rust-clippy:
+      glob: "*.{rs,toml}"
+      run: cargo clippy --workspace --all-targets -- -D warnings
+    typos:
+      run: typos
+
+commit-msg:
+  commands:
+    # Conventional Commits — type required, scope optional, breaking-`!` optional.
+    conventional:
+      run: |
+        grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .{1,}' {1} \
+          || { echo 'Commit message must follow Conventional Commits (https://www.conventionalcommits.org/)'; exit 1; }
+
+pre-push:
+  parallel: true
+  skip:
+    - rebase
+  commands:
+    rust-fmt-check:
+      run: cargo fmt --all -- --check
+    rust-clippy:
+      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+    rust-test:
+      run: cargo test --workspace --all-targets
+    rust-doc:
+      run: cargo doc --workspace --no-deps --document-private-items
+      env:
+        RUSTDOCFLAGS: "-D warnings"
+    typos:
+      run: typos
+    deny:
+      run: command -v cargo-deny >/dev/null && cargo deny --all-features --manifest-path Cargo.toml check || true
+
+# After pull / merge / checkout, warm the dependency cache (informational).
+post-merge:
+  commands:
+    cargo-fetch-warm:
+      glob: "{Cargo.toml,Cargo.lock,crates/*/Cargo.toml}"
+      run: cargo fetch --quiet || true
+
+post-checkout:
+  commands:
+    cargo-fetch-warm:
+      glob: "{Cargo.toml,Cargo.lock,crates/*/Cargo.toml}"
+      run: cargo fetch --quiet || true

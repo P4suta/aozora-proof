@@ -1,0 +1,23 @@
+aozora-proof
+Copyright (c) aozora-proof contributors
+
+This product is licensed under Apache-2.0 OR MIT (see LICENSE-APACHE and
+LICENSE-MIT).
+
+------------------------------------------------------------------------
+Vendored third-party data
+------------------------------------------------------------------------
+
+The character-conformance engine builds on third-party data tables. As each is
+vendored it is recorded here with its upstream source and license:
+
+1. JIS X 0213:2004 mapping table (Project X0213, https://x0213.org/codetable/).
+   "You can use, modify, distribute this table freely." Used to derive the
+   JIS 第1/2/3/4 水準 classifier.
+
+2. 青空文庫 外字注記辞書 (CC0 1.0) — gaiji description ⇔ codepoint, the basis of
+   the gaiji reverse index.
+
+Old-/new-form (旧字体↔新字体) data is derived from primary standards
+(常用漢字表〔内閣告示〕, 表外漢字字体表, 人名用漢字), not from any third-party
+table.

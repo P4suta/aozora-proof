@@ -1,0 +1,18 @@
+[package]
+name                   = "aozora-proof-data"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+keywords.workspace     = true
+categories.workspace   = true
+readme      = "README.md"
+description = "Character-classification tables for aozora-proof: JIS X 0208/0213 水準 levels and 機種依存文字 detection, baked from the Project X0213 mapping table."
+
+[dependencies]
+encoding_rs = { workspace = true }
+
+[lints]
+workspace = true

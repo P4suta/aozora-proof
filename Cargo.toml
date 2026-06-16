@@ -1,0 +1,77 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/aozora-proof-core",
+    "crates/aozora-proof-data",
+    "crates/aozora-proof-cli",
+]
+
+[workspace.package]
+version       = "0.0.0"
+edition       = "2024"
+rust-version  = "1.95.0"
+license       = "Apache-2.0 OR MIT"
+repository    = "https://github.com/P4suta/aozora-proof"
+homepage      = "https://github.com/P4suta/aozora-proof"
+documentation = "https://p4suta.github.io/aozora-proof/"
+authors       = ["aozora-proof contributors"]
+readme        = "README.md"
+keywords      = ["aozora", "japanese", "proofreading", "jis", "linter"]
+categories    = ["text-processing", "localization"]
+
+[workspace.lints.rust]
+# Hard bans — the compiler rejects these rather than warning.
+unsafe_code      = "forbid"
+# Identifier hygiene: all 日本語 appears as string literals, never as idents.
+non_ascii_idents = "deny"
+# Stale scaffolding / unreferenced recognisers must not pile up.
+dead_code        = "deny"
+
+missing_debug_implementations = "warn"
+missing_copy_implementations  = "warn"
+unreachable_pub               = "warn"
+elided_lifetimes_in_paths     = "warn"
+unused_qualifications         = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links  = "deny"
+private_intra_doc_links = "deny"
+bare_urls               = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+cargo    = { level = "warn", priority = -1 }
+# Justified carve-outs.
+module_name_repetitions = "allow"
+multiple_crate_versions = "allow"
+missing_const_for_fn    = "allow"
+redundant_pub_crate     = "allow"
+
+[workspace.dependencies]
+# Sibling repo `aozora` — the pure 青空文庫記法 parser. We consume the single
+# umbrella crate (its front door) with the `wire` feature for the JSON envelope
+# authority. Pinned to a release tag (as the sibling tooling does) so CI and
+# external clones fetch a fixed parser; `version` is kept so a future crates.io
+# publish can resolve to the matching release.
+aozora = { version = "0.4", git = "https://github.com/P4suta/aozora.git", tag = "v0.4.1", features = ["wire"] }
+
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+encoding_rs = "0.8.35"
+proptest    = "1.11"
+clap        = { version = "4.5", features = ["derive", "wrap_help"] }
+
+# Internal workspace crates.
+aozora-proof-core = { version = "0.0.0", path = "crates/aozora-proof-core" }
+aozora-proof-data = { version = "0.0.0", path = "crates/aozora-proof-data" }
+
+[profile.release]
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
+opt-level     = 3
+
+[profile.dev.package."*"]
+opt-level = 1

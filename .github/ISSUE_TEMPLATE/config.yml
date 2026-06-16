@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: aozora parser issue
+    url: https://github.com/P4suta/aozora/issues/new/choose
+    about: Parser bug, AST / diagnostic regression, or gaiji resolution — file against the sibling aozora repo.
+  - name: 青空文庫記法 annotation reference
+    url: https://www.aozora.gr.jp/annotation/
+    about: The official 青空文庫 notation annotation reference.

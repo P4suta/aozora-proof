@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# doc_markdown — domain terms that shouldn't need backticks in docs.
+# https://rust-lang.github.io/rust-clippy/master/index.html#doc_markdown
+# ---------------------------------------------------------------------------
+doc-valid-idents = [
+    "..",
+    "Aozora",
+    "GitHub",
+    "JIS",
+    "Shift_JIS",
+    "UTF-8",
+    "UTF-16",
+    "CP932",
+    "SARIF",
+    "WASM",
+]
+
+# ---------------------------------------------------------------------------
+# Complexity thresholds — tighter than clippy's defaults so creeping
+# complexity is caught at the gate, not in review.
+# ---------------------------------------------------------------------------
+too-many-arguments-threshold   = 4
+too-many-lines-threshold       = 80
+cognitive-complexity-threshold = 18
+type-complexity-threshold      = 250
+max-fn-params-bools            = 1
+enum-variant-name-threshold    = 2
+enum-variant-size-threshold    = 256
+
+# ---------------------------------------------------------------------------
+# Baselines — matches the tight defaults used by mature Rust projects.
+# ---------------------------------------------------------------------------
+# MSRV — matches rust-toolchain.toml so clippy won't flag idioms we can't use.
+msrv = "1.95.0"
+
+# Tests may be expressive about failure; production code stays strict.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests  = true
+
+# Pre-1.0: don't hold the API hostage to export-stability.
+avoid-breaking-exported-api = false
+
+# Surface accidental by-value moves of fat structs during development.
+pass-by-value-size-limit = 128
+
+# ---------------------------------------------------------------------------
+# disallowed-methods — banned std calls that are bug-sources or wrong layer.
+# ---------------------------------------------------------------------------
+disallowed-methods = [
+    { path = "std::mem::forget", reason = "leaks destructors; use `ManuallyDrop` or explicit drop" },
+    { path = "std::env::set_var", reason = "races with other threads; wire via Options instead" },
+    { path = "std::env::remove_var", reason = "see std::env::set_var" },
+    { path = "std::process::exit", reason = "bypasses destructors; use `ExitCode` / return from main" },
+]

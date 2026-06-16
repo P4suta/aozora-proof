@@ -1,0 +1,38 @@
+name: Bug report
+description: A defect in aozora-proof (CLI, engine, or a specific check)
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - aozora-proof-core (engine)
+        - aozora-proof-data (tables)
+        - aozora-proof-cli (CLI)
+        - CI / tooling
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Minimal input
+      description: The shortest text that reproduces the issue. Paste as a code block.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What you expected aozora-proof to report, and what it actually reported.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: "`aozora-proof --version`, or the commit hash."
+    validations:
+      required: false

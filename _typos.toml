@@ -1,0 +1,33 @@
+# typos (https://github.com/crate-ci/typos) configuration.
+# Named `_typos.toml` so it doesn't shadow Cargo features matching on `typos.*`.
+
+[default]
+extend-ignore-identifiers-re = [
+    "[A-Fa-f0-9]{7,}",   # git SHAs in commit messages / changelog
+    "U\\+[0-9A-Fa-f]+",  # Unicode codepoint references in gaiji docs
+]
+
+[default.extend-words]
+# Japanese-domain shorthand that shouldn't trip English typo heuristics.
+aozora  = "aozora"
+gaiji   = "gaiji"        # 外字 — out-of-set glyphs
+mencode = "mencode"      # 面区点 — JIS plane/row/cell reference
+chuki   = "chuki"        # 注記 — typesetting annotation
+ruby    = "ruby"         # ルビ
+bouten  = "bouten"       # 傍点 — emphasis dots
+kome    = "kome"         # ※ — reference-mark name
+kyuji   = "kyuji"        # 旧字 — old-form kanji
+shinji  = "shinji"       # 新字 — new-form kanji
+moji    = "moji"         # 文字
+mut     = "mut"          # Rust keyword
+
+# Names appearing in NOTICE / commit messages.
+Yasunobu = "Yasunobu"
+
+[files]
+extend-exclude = [
+    "target/",
+    "*.lock",
+    "*.html",
+    "crates/aozora-proof-data/data/",   # vendored JIS mapping tables
+]
