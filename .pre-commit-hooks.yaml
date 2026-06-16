@@ -1,0 +1,6 @@
+- id: aozora-proof
+  name: aozora-proof (青空文庫記法 character check)
+  description: Check 青空文庫記法 text files for character-level conformance.
+  entry: aozora-proof check --format short --fail-on error
+  language: rust
+  files: \.txt$

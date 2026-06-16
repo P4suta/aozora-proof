@@ -1,0 +1,54 @@
+name: "Aozora Proof"
+description: "Check 青空文庫記法 (Aozora Bunko notation) text files for character-level conformance, with SARIF upload to the Security tab."
+author: "aozora-proof contributors"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  files:
+    description: "Space-separated files / globs to check (bash globstar is enabled)."
+    required: false
+    default: "**/*.txt"
+  fail-on:
+    description: "Fail the job on findings at or above this severity (error | warning | note)."
+    required: false
+    default: "error"
+  upload-sarif:
+    description: "Upload results to the Security tab (needs `security-events: write`)."
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install aozora-proof
+      shell: bash
+      run: cargo install --locked --git https://github.com/P4suta/aozora-proof.git aozora-proof-cli
+    - name: Check
+      id: check
+      shell: bash
+      run: |
+        set +e
+        shopt -s globstar nullglob
+        # shellcheck disable=SC2086
+        files=( ${{ inputs.files }} )
+        sarif="$RUNNER_TEMP/aozora-proof.sarif"
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "aozora-proof: no files matched '${{ inputs.files }}'"
+          printf '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"aozora-proof"}},"results":[]}]}' > "$sarif"
+          echo "exit_code=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        aozora-proof check "${files[@]}" --format sarif --fail-on "${{ inputs.fail-on }}" > "$sarif"
+        echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+    - name: Upload SARIF
+      if: ${{ inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ runner.temp }}/aozora-proof.sarif
+    - name: Enforce threshold
+      shell: bash
+      run: exit ${{ steps.check.outputs.exit_code }}
