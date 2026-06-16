@@ -2,3 +2,8 @@
 **/*.rs.bk
 Cargo.lock.orig
 .DS_Store
+
+# wasm-pack output + assembled site (built by CI; see .github/workflows/docs.yml)
+/web/pkg/
+/web/api/
+/crates/aozora-proof-wasm/pkg/

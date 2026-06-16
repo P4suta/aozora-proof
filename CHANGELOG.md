@@ -28,3 +28,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A composite **GitHub Action** (`action/`) that runs the checks and uploads
   SARIF to the Security tab, and a **pre-commit** hook (`.pre-commit-hooks.yaml`)
   for downstream `.txt` repositories.
+- A **WebAssembly package** (`aozora-proof-wasm`) and a **static web app**
+  (`web/`) that run the checks entirely in the browser (paste text → findings,
+  plus 外字 search), deployed to GitHub Pages alongside the rustdoc API at `/api/`.
