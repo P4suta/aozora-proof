@@ -3,7 +3,6 @@
 Cargo.lock.orig
 .DS_Store
 
-# wasm-pack output + assembled site (built by CI; see .github/workflows/docs.yml)
-/web/pkg/
-/web/api/
+# wasm-pack default output dir (we build into web/src/lib/pkg; the SvelteKit
+# build / node_modules / wasm ignores live in web/.gitignore).
 /crates/aozora-proof-wasm/pkg/

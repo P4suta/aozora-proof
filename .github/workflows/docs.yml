@@ -26,20 +26,36 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           tools: wasm-pack@0.15
-      - name: Build wasm package (→ web/pkg)
-        run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
+      - name: Build wasm package (→ web/src/lib/pkg)
+        run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/src/lib/pkg
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install web deps
+        run: pnpm install --frozen-lockfile
+        working-directory: web
+      - name: Build static site (→ web/build)
+        run: pnpm run build
+        working-directory: web
+        env:
+          BASE_PATH: /aozora-proof
       - name: Build rustdoc
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
-      - name: Assemble site (web app at root, rustdoc under /api/)
+      - name: Add rustdoc under /api/
         run: |
-          mkdir -p web/api
-          cp -r target/doc/. web/api/
-          printf '<meta http-equiv="refresh" content="0; url=aozora_proof_core/index.html">' > web/api/index.html
+          mkdir -p web/build/api
+          cp -r target/doc/. web/build/api/
+          printf '<meta http-equiv="refresh" content="0; url=aozora_proof_core/index.html">' > web/build/api/index.html
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: web
+          path: web/build
 
   deploy:
     needs: build

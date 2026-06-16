@@ -41,6 +41,21 @@ pub fn gaiji_search_json(query: &str) -> String {
         .unwrap_or_else(|_| String::from(r#"{"matches":[]}"#))
 }
 
+/// Map every documented finding `code` to its human-readable Japanese title, as
+/// a JSON object `{ "aozora::char::platform_dependent": "機種依存文字", … }`.
+///
+/// The web app shows this readable category instead of the raw internal code.
+/// Codes without a `RuleDoc` (e.g. notation `aozora::lex::*`) are absent.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen(js_name = ruleTitlesJson))]
+#[must_use]
+pub fn rule_titles_json() -> String {
+    let map: serde_json::Map<String, serde_json::Value> = aozora_proof_core::all_rules()
+        .iter()
+        .map(|r| (r.code.to_owned(), serde_json::Value::from(r.title)))
+        .collect();
+    serde_json::to_string(&map).unwrap_or_else(|_| String::from("{}"))
+}
+
 /// The wire-format schema version (matches `aozora_proof_core::SCHEMA_VERSION`).
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(js_name = schemaVersion))]
 #[must_use]
@@ -68,6 +83,19 @@ mod tests {
         let json = gaiji_search_json("尓－小");
         assert!(json.contains("\"matches\""));
         assert!(json.contains("U+20089"));
+    }
+
+    #[test]
+    fn rule_titles_json_maps_code_to_title() {
+        let json = rule_titles_json();
+        let map: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            map.get("aozora::char::platform_dependent")
+                .and_then(serde_json::Value::as_str),
+            Some("機種依存文字")
+        );
+        // Notation findings have no RuleDoc, so their codes are absent.
+        assert!(map.get("aozora::lex::unterminated_ruby").is_none());
     }
 
     #[test]
