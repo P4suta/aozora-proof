@@ -15,11 +15,11 @@ setup-toolchain:
     rustup show
     rustup target add wasm32-unknown-unknown
 
-# install the pinned dev tools fast via cargo-binstall (prebuilt binaries).
+# install every pinned dev tool from the single mise manifest
+# (mise.toml + .config/mise/config.toml). Replaces the old
+# dev-tools.txt + cargo-binstall path.
 setup-tools:
-    command -v cargo-binstall >/dev/null 2>&1 || cargo install cargo-binstall --locked
-    sed -E 's/#.*//' dev-tools.txt | xargs cargo binstall --no-confirm
-    command -v lefthook >/dev/null 2>&1 || cargo binstall --no-confirm lefthook
+    mise install
 
 # report dev-tool + toolchain status against what CI pins (read-only).
 doctor:

@@ -1,0 +1,16 @@
+# mise (https://mise.jdx.dev/) — single declarative source of dev-tool
+# versions for aozora-proof. Run `just setup` (or `mise install`) once
+# after cloning to provision everything.
+#
+# Rust + cargo-built plugins live in .config/mise/config.toml; mise reads
+# both files and merges the [tools] tables.
+[tools]
+just                        = "latest"
+lefthook                    = "latest"
+"github:crate-ci/typos"     = "1.47"
+"github:crate-ci/committed" = "latest"
+actionlint                  = "latest"
+shellcheck                  = "latest"
+# web/ is a SvelteKit app (see `just lint-web`).
+node = "24"
+pnpm = "latest"
