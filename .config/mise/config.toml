@@ -1,0 +1,17 @@
+# Rust toolchain + cargo-built dev tools for aozora-proof. mise merges
+# this with mise.toml (same directory, tool-level union), so a single
+# `mise install` provisions everything.
+#
+# The rust version is the source of truth in rust-toolchain.toml; it is
+# restated here so `mise install` provisions a matching toolchain. The
+# cargo-tool minors mirror CI's install-action pins
+# (.github/workflows/ci.yml) for local == CI parity — bump them together.
+[tools]
+rust = "1.95.0"
+"cargo:cargo-nextest" = "0.9"
+"cargo:cargo-deny" = "0.19"
+"cargo:cargo-llvm-cov" = "0.8"
+"cargo:wasm-pack" = "0.15"
+"cargo:bacon" = "3"
+"cargo:watchexec-cli" = "2.5"
+"cargo:taplo-cli" = "0.10"
