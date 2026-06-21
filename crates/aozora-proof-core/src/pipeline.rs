@@ -1,8 +1,10 @@
 //! Orchestration — combine the notation layer (the `aozora` parser) with the
-//! character layers (conformance + 旧字体↔新字体) into one [`Report`].
+//! character layers (conformance + 旧字体↔新字体 + 外字注記) into one [`Report`].
 //!
-//! [`run_all`] runs file-structure checks, the notation layer, and the
-//! character-conformance and 旧字体↔新字体 layers over raw bytes.
+//! [`run_all`] runs file-structure checks, the notation layer, the
+//! character-conformance and 旧字体↔新字体 layers, and finally a gaiji pass that
+//! attaches 外字注記 suggestions to the characters that need one — all over raw
+//! bytes.
 
 use crate::coords::SpanMap;
 use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
@@ -67,6 +69,10 @@ pub fn run_all(raw: &[u8]) -> Report {
         findings.extend(run_notation(&text));
         findings.extend(crate::moji::check(&text));
         findings.extend(crate::kyuji::check(&text));
+        // Gaiji layer: enrich (does not add) — attach a 外字注記 suggestion to
+        // the character findings that need one. Runs last so it only fills
+        // gaps left by the other layers' suggestions.
+        crate::gaiji_dict::annotate(&mut findings);
         text.into_owned()
     } else {
         findings.push(Finding {

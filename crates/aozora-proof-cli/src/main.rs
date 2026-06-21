@@ -428,6 +428,11 @@ fn print_human(results: &[(String, Report)], painter: Painter) {
             let badge = painter.paint(severity_style(finding.severity), &badge);
             let code = painter.paint(Style::new().dimmed(), finding.code);
             println!("  {line}:{col}  {badge}  {code}  {}", finding.message);
+            if let Some(s) = &finding.suggestion {
+                let tip =
+                    painter.paint(Style::new().dimmed(), &format!("      ↳ 提案: {}", s.label));
+                println!("{tip}");
+            }
             total += 1;
         }
         println!();
@@ -607,15 +612,20 @@ fn apply_suggestions(decoded: &str, subs: &[&Suggestion]) -> String {
     let mut ordered: Vec<&Suggestion> = subs.to_vec();
     ordered.sort_by_key(|s| core::cmp::Reverse(s.span.start));
     let mut text = decoded.to_owned();
+    // Lowest start already rewritten. Applying right-to-left, each next span must
+    // end at or before this floor; an overlapping suggestion is skipped rather
+    // than letting two replacements clobber one span into corrupt output.
+    let mut floor = text.len();
     for s in ordered {
         let start = usize::try_from(s.span.start).unwrap_or(usize::MAX);
         let end = usize::try_from(s.span.end).unwrap_or(usize::MAX);
         if start <= end
-            && end <= text.len()
+            && end <= floor
             && text.is_char_boundary(start)
             && text.is_char_boundary(end)
         {
             text.replace_range(start..end, &s.replacement);
+            floor = start;
         }
     }
     text
@@ -732,5 +742,36 @@ fn print_gaiji_info(info: &GaijiInfo, json: bool, painter: Painter) {
         if let Some(chuki) = &info.chuki {
             println!("外字注記: {chuki}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sugg(start: u32, end: u32, replacement: &str) -> Suggestion {
+        Suggestion {
+            replacement: replacement.to_owned(),
+            span: aozora_proof_core::Span { start, end },
+            label: String::new(),
+        }
+    }
+
+    #[test]
+    fn apply_suggestions_rewrites_right_to_left() {
+        let a = sugg(0, 3, "X");
+        let b = sugg(3, 6, "Y");
+        let out = apply_suggestions("ありがとう", &[&a, &b]);
+        assert_eq!(out, "XYがとう");
+    }
+
+    #[test]
+    fn apply_suggestions_skips_overlapping_spans() {
+        // Two suggestions on the same span (the kyuji+gaiji overlap case): only
+        // the first survives; the result must never be a mangled splice.
+        let kyuji = sugg(0, 3, "即");
+        let gaiji = sugg(0, 3, "※［＃「皀＋卩」、第3水準1-14-81］");
+        let out = apply_suggestions("卽です", &[&kyuji, &gaiji]);
+        assert_eq!(out, "即です");
     }
 }
