@@ -79,11 +79,10 @@ module_name_repetitions = "allow"
 multiple_crate_versions = "allow"
 
 [workspace.dependencies]
-# The sibling 青空文庫記法 parser, pinned to an immutable commit SHA (v0.4.1); `wire` gives the JSON envelope types.
-# Ecosystem policy: pin by rev (not tag) so the dependency cannot drift if a tag is ever moved. SHA = v0.4.1.
-aozora = { version = "0.4", git = "https://github.com/P4suta/aozora.git", rev = "a53c632b1d1be4bfcbce7de010ab5b0843e98cc0", features = [
-    "wire",
-] }
+# The sibling 青空文庫記法 parser, from crates.io; `wire` gives the JSON envelope types.
+# crates.io releases are immutable, and Cargo.lock pins the exact version — same
+# reproducibility the old git-rev pin gave, without blocking our own publish.
+aozora = { version = "0.4", features = ["wire"] }
 
 serde                 = { version = "1.0", features = ["derive"] }
 serde_json            = "1.0"

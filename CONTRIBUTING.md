@@ -12,7 +12,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
 - **No warning suppressions.** An `#[allow(...)]` needs a `reason = "…"`; CI runs
   clippy with `-D warnings`.
 - **The notation level belongs upstream.** `aozora-proof` consumes the
-  [`aozora`](https://github.com/P4suta/aozora) parser (pinned by release tag)
+  [`aozora`](https://github.com/P4suta/aozora) parser (from crates.io)
   for ruby / bouten / 外字 resolution / diagnostics. Parser changes land there,
   not here; this repo owns the **character level** only.
 - **Conventional Commits**, enforced by the `commit-msg` hook.
