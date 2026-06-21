@@ -33,6 +33,14 @@ aozora-proof-wasm ──┘
 
 The core stays pure so the *same* engine drives the CLI and the in-browser web app.
 
+> **Planned change ([ADR 0003](docs/adr/0003-character-facts-belong-upstream.md)).**
+> The character *facts* in `aozora-proof-data` — JIS 水準, 機種依存文字,
+> 旧字体↔新字体, the 外字注記辞書 — are objective writing-system data that a
+> renderer and an LSP want too, so they are migrating upstream into `aozora`.
+> `aozora-proof` keeps the *policy* (which facts are findings, at what severity)
+> and the product. Once upstream ships the API, `aozora-proof-data` is retired
+> and `core` depends on `aozora` alone (#26, #27).
+
 ## The pipeline
 
 `core::run_all(raw: &[u8]) -> Report` is the spine
@@ -87,6 +95,10 @@ hands it to the web app verbatim.
 - **外字注記辞書** descriptions for gaiji search — `aozora-gaiji-chuki.tsv`.
 
 Each carries its own upstream license; see [`NOTICE`](NOTICE).
+
+Per [ADR 0003](docs/adr/0003-character-facts-belong-upstream.md), these tables
+and their `NOTICE` attributions are writing-system *facts* and are moving
+upstream into `aozora`; this section shrinks to a pointer once #27 lands.
 
 ## Where to add a check
 
