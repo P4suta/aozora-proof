@@ -1,0 +1,30 @@
+[package]
+name    = "aozora-proof-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys     = "0.4"
+aozora-proof-core = { path = "../crates/aozora-proof-core" }
+
+[[bin]]
+name  = "run_all"
+path  = "fuzz_targets/run_all.rs"
+test  = false
+doc   = false
+bench = false
+
+[[bin]]
+name  = "gaiji"
+path  = "fuzz_targets/gaiji.rs"
+test  = false
+doc   = false
+bench = false
+
+# Detach from the main workspace: cargo-fuzz targets need the nightly libFuzzer
+# runtime and must not be pulled into the stable `cargo build --workspace`.
+[workspace]

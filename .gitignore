@@ -6,3 +6,12 @@ Cargo.lock.orig
 # wasm-pack default output dir (we build into web/src/lib/pkg; the SvelteKit
 # build / node_modules / wasm ignores live in web/.gitignore).
 /crates/aozora-proof-wasm/pkg/
+
+# cargo-fuzz: build output and generated corpora/crashes. The fuzz crate's
+# sources + Cargo.lock are committed; these are regenerated locally / in CI.
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+
+# cargo-llvm-cov local report output (`just cov`; CI uploads it as an artifact).
+/lcov.info

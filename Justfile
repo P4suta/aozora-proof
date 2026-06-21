@@ -68,6 +68,11 @@ test-portable *ARGS:
     cargo test --workspace --all-targets {{ ARGS }}
     cargo test --workspace --doc
 
+# run a libFuzzer target (needs nightly + cargo-fuzz; see fuzz/).
+# e.g. `just fuzz run_all 120` or `just fuzz gaiji`. Mirrors fuzz.yml.
+fuzz target="run_all" secs="60":
+    cargo +nightly fuzz run {{ target }} -- -max_total_time={{ secs }}
+
 # auto-format Rust, TOML, and web assets (taplo/pnpm skipped if not installed).
 fmt:
     cargo fmt --all
@@ -104,7 +109,11 @@ lint-web: wasm
     pnpm -C web run build
 
 cov:
-    cargo llvm-cov --workspace --summary-only
+    cargo llvm-cov --workspace --no-report
+    cargo llvm-cov report --lcov --output-path lcov.info
+    cargo llvm-cov report --html
+    cargo llvm-cov report --summary-only
+    @echo "cov: lcov.info + target/llvm-cov/html written"
 
 # everything CI's gating jobs run (test + lint + deny). Mirrors ci.yml.
 ci: fmt-check clippy test doc deny typos lint-toml lint-actions lint-web
