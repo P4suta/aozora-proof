@@ -8,6 +8,7 @@ that links back.
 | ADR                                                 | Title                         | Status   |
 | --------------------------------------------------- | ----------------------------- | -------- |
 | [0001](./adr/0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
+| [0002](./adr/0002-strict-lint-policy.md)            | Strict deny-level lint policy | accepted |
 
 ## Authoring a new ADR
 
