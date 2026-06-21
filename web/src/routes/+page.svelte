@@ -81,6 +81,11 @@
 							{f.title}
 						</span>
 					{/if}
+					{#if f.suggestion}
+						<span class="w-full text-[0.85rem] text-muted">
+							↳ 提案: <span class="font-serif text-fg">{f.suggestion.label}</span>
+						</span>
+					{/if}
 				</li>
 			{/each}
 		{/if}

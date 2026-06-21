@@ -62,6 +62,52 @@ fn char_level_corpus() {
 }
 
 #[test]
+fn gaiji_layer_suggests_a_chuki_for_a_needs_chuki_char() {
+    // U+3094 (ゔ) is 第3水準 1-4-84 with a conformant description: run_all flags
+    // it as needing a 外字注記, and the gaiji layer attaches the concrete 注記
+    // inline as a suggestion (so `check --fix` / the web can offer it).
+    let report = run_all("\u{3094}".as_bytes());
+    let f = report
+        .findings
+        .iter()
+        .find(|f| f.codepoint == Some('\u{3094}'))
+        .expect("the 第3/第4水準 char is flagged");
+    let s = f
+        .suggestion
+        .as_ref()
+        .expect("the gaiji layer attaches a 外字注記 suggestion");
+    assert!(
+        s.replacement.starts_with("※［＃"),
+        "expected a 外字注記 form, got {:?}",
+        s.replacement
+    );
+    assert!(s.replacement.contains("第3水準1-4-84"));
+    // The suggested 注記 must itself be character-conformant (the fix never
+    // trades one finding for another).
+    assert!(run_all(s.replacement.as_bytes()).findings.is_empty());
+}
+
+#[test]
+fn overlapping_kyuji_and_gaiji_yields_one_clean_suggestion() {
+    // 卽 (U+537D) is BOTH 旧字体 (→ 即) and 第3水準 1-14-81, so the kyuji and moji
+    // layers flag the SAME span. The gaiji layer must not add a second,
+    // overlapping suggestion there — otherwise `--fix` applies both and corrupts
+    // the text. Exactly one suggestion survives, and it is the 新字体 one.
+    let report = run_all("卽".as_bytes());
+    let suggested: Vec<&str> = report
+        .findings
+        .iter()
+        .filter_map(|f| f.suggestion.as_ref())
+        .map(|s| s.replacement.as_str())
+        .collect();
+    assert_eq!(
+        suggested,
+        vec!["即"],
+        "exactly one suggestion (the 新字体 fix), not also a 外字注記"
+    );
+}
+
+#[test]
 fn invalid_encoding_is_reported() {
     let report = run_all(&[0xFF, 0xFE, 0xFF]);
     assert!(

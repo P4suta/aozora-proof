@@ -8,11 +8,18 @@ type WasmModule = {
 	ruleTitlesJson: () => string;
 };
 
+export type Suggestion = {
+	replacement: string;
+	span: { start: number; end: number };
+	label: string;
+};
+
 export type Finding = {
 	code: string;
 	severity: string;
 	span: { start: number; end: number };
 	message: string;
+	suggestion?: Suggestion;
 };
 
 export type GaijiMatch = { description: string; char: string; codepoint: string };

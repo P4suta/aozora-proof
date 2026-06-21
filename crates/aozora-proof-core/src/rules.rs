@@ -87,7 +87,8 @@ const RULES: &[RuleDoc] = &[
                     直接置かず外字注記で示します。",
         example_bad: "第3水準の漢字をそのまま本文に置く",
         example_good: "外字注記（［＃…］）で表記する",
-        fix: "外字注記に置き換えます。`aozora-proof gaiji <文字>` で面区点を確認できます。",
+        fix: "外字注記に置き換えます。対応できる字には `check` が注記候補を併記します\
+              （`aozora-proof gaiji <文字>` でも面区点を確認できます）。",
     },
     RuleDoc {
         code: "aozora::char::not_in_jisx0213",
