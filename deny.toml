@@ -40,6 +40,3 @@ highlight         = "all"
 unknown-registry = "deny"
 unknown-git      = "deny"
 allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
-# `aozora` is consumed via a git tag pin (see Cargo.toml workspace.deps).
-# Listed explicitly so cargo-deny doesn't fail on the "unknown-git" rule.
-allow-git = ["https://github.com/P4suta/aozora.git"]

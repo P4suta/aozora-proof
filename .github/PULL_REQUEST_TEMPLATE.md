@@ -9,7 +9,7 @@
 - [ ] Refactor (no behaviour change)
 - [ ] Documentation
 - [ ] CI / developer tooling
-- [ ] `aozora` parser pin bump
+- [ ] `aozora` dependency bump
 
 ## Affected component
 
