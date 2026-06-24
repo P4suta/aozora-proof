@@ -9,6 +9,7 @@ that links back.
 | --------------------------------------------------- | ----------------------------- | -------- |
 | [0001](./adr/0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
 | [0002](./adr/0002-strict-lint-policy.md)            | Strict deny-level lint policy | accepted |
+| [0003](./adr/0003-character-facts-belong-upstream.md) | Character-fact data belongs to `aozora` | accepted |
 
 ## Authoring a new ADR
 
