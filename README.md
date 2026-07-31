@@ -10,6 +10,10 @@
 A modern, FOSS proofreading toolkit for **青空文庫記法 (Aozora Bunko notation)**
 text — built to run locally, in **CI**, and in the browser as a static web app.
 
+The project is currently an experimental validation tool. Its Rust crates are
+not published, and no compatibility promise is made for the internal API while
+the rules are measured against real works.
+
 `aozora-proof` checks the **character level** of a manuscript — the layer the
 [`aozora`](https://github.com/P4suta/aozora) parser deliberately leaves alone —
 and folds in the parser's notation diagnostics into one unified report:
@@ -33,6 +37,7 @@ $ aozora-proof check seihon.txt
 $ cat seihon.txt | aozora-proof check -
 $ aozora-proof check --format json *.txt          # machine-readable, for CI
 $ aozora-proof check --fail-on warning chapter*.txt
+$ aozora-proof check --diff old.txt                 # preview only; never writes
 $ aozora-proof check --watch draft.txt            # re-check on every save
 $ aozora-proof explain aozora::char::platform_dependent   # why a code fired
 $ aozora-proof completions zsh > ~/.zfunc/_aozora-proof   # shell completions
@@ -80,6 +85,7 @@ repos:
 | `aozora-proof-data` | character-classification tables (JIS 水準, 機種依存文字, 旧字体, gaiji), baked at build time |
 | `aozora-proof-cli`  | the `aozora-proof` binary |
 | `aozora-proof-wasm` | wasm-bindgen façade powering the in-browser web app (`web/`) |
+| `xtask` | unpublished real-corpus audit command used during rule validation |
 
 A static **web app** (`web/`) runs the checks in the browser — paste text to see
 findings plus 外字 search — published to
@@ -89,6 +95,10 @@ findings plus 外字 search — published to
 
 `./bootstrap.sh` provisions the toolchain and dev tools; `just --list` shows
 every task. See [CONTRIBUTING](CONTRIBUTING.md) and [ARCHITECTURE](ARCHITECTURE.md).
+
+`just audit-corpus /path/to/corpus` writes a deterministic aggregate report
+under `target/`. It records counts and relative sample paths, never manuscript
+contents.
 
 ## License
 

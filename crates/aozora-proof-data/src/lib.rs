@@ -205,6 +205,7 @@ mod tests {
         assert_eq!(jis_level('\u{1F363}'), Suijun::Outside); // 🍣 — not in JIS X 0213
         assert_eq!(jis_level('\u{FF5C}'), Suijun::Level1); // ｜ ruby marker, via Fullwidth alias
         assert_eq!(jis_level('\u{FF03}'), Suijun::Level1); // ＃ annotation marker
+        assert_eq!(jis_level('\u{2015}'), Suijun::Level1); // ― CP932 alias of JIS 1-1-29
     }
 
     #[test]
@@ -247,6 +248,7 @@ mod tests {
 
     #[test]
     fn platform_dependent() {
+        assert!(!is_platform_dependent('\u{2015}')); // ― maps to a JIS X 0208 cell
         assert!(is_platform_dependent('\u{2460}')); // ① NEC special, CP932 ∖ 0208
         assert!(!is_platform_dependent('\u{4E9C}')); // 亜 in 0208
         assert!(!is_platform_dependent('A')); // ASCII guard

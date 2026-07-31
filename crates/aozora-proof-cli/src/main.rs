@@ -18,7 +18,7 @@ use anstyle::{AnsiColor, Style};
 use aozora_proof_core::gaiji_dict::{self, GaijiInfo};
 use aozora_proof_core::{
     Finding, FindingSource, Report, RuleDoc, SCHEMA_VERSION, Severity, Suggestion, all_rules,
-    explain, run_all,
+    explain, run_submission,
 };
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
@@ -34,7 +34,7 @@ const AFTER_HELP: &str = "\
   aozora-proof check seihon.txt              # 1ファイルを校正
   cat seihon.txt | aozora-proof check -      # 標準入力から
   aozora-proof check --format json *.txt     # CI 向け JSON
-  aozora-proof check --fix old.txt           # 旧字体→新字体を適用して書き戻す
+  aozora-proof check --diff old.txt          # 置換候補だけを確認
   aozora-proof explain aozora::char::platform_dependent
   aozora-proof completions zsh > _aozora-proof";
 
@@ -75,7 +75,7 @@ enum Command {
 #[derive(Args)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "CLI mode flags (--strict/--diff/--fix/--watch) are naturally booleans"
+    reason = "CLI mode flags (--strict/--diff/--watch) are naturally booleans"
 )]
 struct CheckArgs {
     /// 入力ファイル（複数可）。`-` で標準入力を読む。
@@ -95,15 +95,11 @@ struct CheckArgs {
     fail_on: SeverityArg,
 
     /// 旧字体→新字体の置換候補をプレビューする（書き込まない）。
-    #[arg(long, conflicts_with = "fix")]
+    #[arg(long)]
     diff: bool,
 
-    /// 旧字体→新字体の置換を適用してファイルに書き戻す（UTF-8 で出力）。
-    #[arg(long)]
-    fix: bool,
-
-    /// ファイル変更を監視して自動で再校正する（human 表示・--fix/--diff とは併用不可）。
-    #[arg(long, conflicts_with_all = ["fix", "diff"])]
+    /// ファイル変更を監視して自動で再校正する（human 表示・--diff とは併用不可）。
+    #[arg(long, conflicts_with = "diff")]
     watch: bool,
 }
 
@@ -265,7 +261,7 @@ fn run_check(args: &CheckArgs, painter: Painter) -> ExitCode {
                 } else {
                     path.display().to_string()
                 };
-                results.push((label, run_all(&bytes)));
+                results.push((label, run_submission(&bytes)));
             }
             Err(err) => {
                 eprintln!("aozora-proof: {}: {err}", path.display());
@@ -274,8 +270,8 @@ fn run_check(args: &CheckArgs, painter: Painter) -> ExitCode {
         }
     }
 
-    if args.fix || args.diff {
-        return run_fix(&results, args, read_error);
+    if args.diff {
+        return run_diff(&results, read_error);
     }
 
     match resolve_format(args.format) {
@@ -346,7 +342,7 @@ fn check_once(args: &CheckArgs, painter: Painter) {
     let mut results: Vec<(String, Report)> = Vec::new();
     for path in &args.paths {
         match read_input(path) {
-            Ok(bytes) => results.push((path.display().to_string(), run_all(&bytes))),
+            Ok(bytes) => results.push((path.display().to_string(), run_submission(&bytes))),
             Err(err) => eprintln!("aozora-proof: {}: {err}", path.display()),
         }
     }
@@ -565,8 +561,8 @@ const fn sev_rank_arg(severity: SeverityArg) -> u8 {
     }
 }
 
-/// `--diff` / `--fix`: preview or apply the 旧字体→新字体 replacement suggestions.
-fn run_fix(results: &[(String, Report)], args: &CheckArgs, read_error: bool) -> ExitCode {
+/// `--diff`: preview replacement suggestions without modifying input files.
+fn run_diff(results: &[(String, Report)], read_error: bool) -> ExitCode {
     let mut total = 0usize;
     for (label, report) in results {
         let subs: Vec<&Suggestion> = report
@@ -578,57 +574,18 @@ fn run_fix(results: &[(String, Report)], args: &CheckArgs, read_error: bool) -> 
             continue;
         }
         total += subs.len();
-        if args.diff {
-            println!("{label}:");
-            for s in &subs {
-                let (line, col) = line_col(&report.decoded, s.span.start);
-                println!("  {line}:{col}  {}", s.label);
-            }
-        } else {
-            let fixed = apply_suggestions(&report.decoded, &subs);
-            if label == "<stdin>" {
-                print!("{fixed}");
-            } else if let Err(err) = fs::write(label, &fixed) {
-                eprintln!("aozora-proof: {label}: {err}");
-                return ExitCode::from(2);
-            }
+        println!("{label}:");
+        for s in &subs {
+            let (line, col) = line_col(&report.decoded, s.span.start);
+            println!("  {line}:{col}  {}", s.label);
         }
     }
-    if args.fix {
-        eprintln!("aozora-proof: applied {total} replacement(s) (written as UTF-8)");
-    } else {
-        eprintln!("aozora-proof: {total} suggested replacement(s)");
-    }
+    eprintln!("aozora-proof: {total} suggested replacement(s)");
     if read_error {
         ExitCode::from(2)
     } else {
         ExitCode::SUCCESS
     }
-}
-
-/// Apply replacement suggestions to `decoded`, right-to-left so earlier byte
-/// offsets stay valid as later spans are replaced.
-fn apply_suggestions(decoded: &str, subs: &[&Suggestion]) -> String {
-    let mut ordered: Vec<&Suggestion> = subs.to_vec();
-    ordered.sort_by_key(|s| core::cmp::Reverse(s.span.start));
-    let mut text = decoded.to_owned();
-    // Lowest start already rewritten. Applying right-to-left, each next span must
-    // end at or before this floor; an overlapping suggestion is skipped rather
-    // than letting two replacements clobber one span into corrupt output.
-    let mut floor = text.len();
-    for s in ordered {
-        let start = usize::try_from(s.span.start).unwrap_or(usize::MAX);
-        let end = usize::try_from(s.span.end).unwrap_or(usize::MAX);
-        if start <= end
-            && end <= floor
-            && text.is_char_boundary(start)
-            && text.is_char_boundary(end)
-        {
-            text.replace_range(start..end, &s.replacement);
-            floor = start;
-        }
-    }
-    text
 }
 
 fn run_gaiji(args: &GaijiArgs, painter: Painter) -> ExitCode {
@@ -742,36 +699,5 @@ fn print_gaiji_info(info: &GaijiInfo, json: bool, painter: Painter) {
         if let Some(chuki) = &info.chuki {
             println!("外字注記: {chuki}");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sugg(start: u32, end: u32, replacement: &str) -> Suggestion {
-        Suggestion {
-            replacement: replacement.to_owned(),
-            span: aozora_proof_core::Span { start, end },
-            label: String::new(),
-        }
-    }
-
-    #[test]
-    fn apply_suggestions_rewrites_right_to_left() {
-        let a = sugg(0, 3, "X");
-        let b = sugg(3, 6, "Y");
-        let out = apply_suggestions("ありがとう", &[&a, &b]);
-        assert_eq!(out, "XYがとう");
-    }
-
-    #[test]
-    fn apply_suggestions_skips_overlapping_spans() {
-        // Two suggestions on the same span (the kyuji+gaiji overlap case): only
-        // the first survives; the result must never be a mangled splice.
-        let kyuji = sugg(0, 3, "即");
-        let gaiji = sugg(0, 3, "※［＃「皀＋卩」、第3水準1-14-81］");
-        let out = apply_suggestions("卽です", &[&kyuji, &gaiji]);
-        assert_eq!(out, "即です");
     }
 }

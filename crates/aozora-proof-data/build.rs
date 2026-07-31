@@ -87,14 +87,12 @@ fn parse_jis(text: &str) -> (LevelMap, MenKuTenMap) {
         let ten = u8::try_from(rrcc & 0x00ff).unwrap_or(0).wrapping_sub(0x20);
         menkuten.entry(cp).or_insert((men, ku, ten));
 
-        // Full-width aliases (the ｜＃［］ markers and full-width punctuation are
-        // noted via "Fullwidth: U+XXXX"); register them at the same 水準.
-        // "Windows: U+XXXX" aliases are deliberately NOT registered — those are
-        // the non-portable Windows variants that should surface as 機種依存文字.
-        if let Some(rest) = line.split("Fullwidth: U+").nth(1) {
-            let fw: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
-            if let Ok(fullwidth) = u32::from_str_radix(&fw, 16) {
-                upsert(&mut levels, fullwidth, level);
+        for marker in ["Fullwidth: U+", "Windows: U+"] {
+            if let Some(rest) = line.split(marker).nth(1) {
+                let alias: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
+                if let Ok(codepoint) = u32::from_str_radix(&alias, 16) {
+                    upsert(&mut levels, codepoint, level);
+                }
             }
         }
     }

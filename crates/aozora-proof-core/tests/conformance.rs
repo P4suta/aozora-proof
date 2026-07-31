@@ -34,6 +34,16 @@ const CHAR_CASES: &[(&str, &str, &[&str])] = &[
     ("utf8_bom", "\u{FEFF}あ", &["aozora::char::utf8_bom"]),
     ("bare_lf", "a\nb", &["aozora::char::crlf_expected"]),
     (
+        "mixed_line_endings",
+        "a\r\nb\nc",
+        &["aozora::char::mixed_line_endings"],
+    ),
+    (
+        "control_character",
+        "a\tb",
+        &["aozora::char::control_character"],
+    ),
+    (
         "kyuji",
         "\u{4F86}", // 來 → 来
         &["aozora::kyuji::has_shinji_form"],
@@ -63,9 +73,6 @@ fn char_level_corpus() {
 
 #[test]
 fn gaiji_layer_suggests_a_chuki_for_a_needs_chuki_char() {
-    // U+3094 (ゔ) is 第3水準 1-4-84 with a conformant description: run_all flags
-    // it as needing a 外字注記, and the gaiji layer attaches the concrete 注記
-    // inline as a suggestion (so `check --fix` / the web can offer it).
     let report = run_all("\u{3094}".as_bytes());
     let f = report
         .findings
@@ -82,17 +89,11 @@ fn gaiji_layer_suggests_a_chuki_for_a_needs_chuki_char() {
         s.replacement
     );
     assert!(s.replacement.contains("第3水準1-4-84"));
-    // The suggested 注記 must itself be character-conformant (the fix never
-    // trades one finding for another).
     assert!(run_all(s.replacement.as_bytes()).findings.is_empty());
 }
 
 #[test]
 fn overlapping_kyuji_and_gaiji_yields_one_clean_suggestion() {
-    // 卽 (U+537D) is BOTH 旧字体 (→ 即) and 第3水準 1-14-81, so the kyuji and moji
-    // layers flag the SAME span. The gaiji layer must not add a second,
-    // overlapping suggestion there — otherwise `--fix` applies both and corrupts
-    // the text. Exactly one suggestion survives, and it is the 新字体 one.
     let report = run_all("卽".as_bytes());
     let suggested: Vec<&str> = report
         .findings

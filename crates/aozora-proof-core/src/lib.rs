@@ -28,7 +28,6 @@
     )
 )]
 
-pub mod coords;
 pub mod finding;
 pub mod pipeline;
 pub mod rules;
@@ -40,5 +39,5 @@ pub mod moji;
 pub use finding::{
     Finding, FindingSource, Origin, SCHEMA_VERSION, Severity, Span, Suggestion, serialize_findings,
 };
-pub use pipeline::{Report, run_all, run_notation};
+pub use pipeline::{Report, run_all, run_notation, run_submission};
 pub use rules::{RuleDoc, all_rules, explain};

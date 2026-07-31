@@ -6,7 +6,6 @@
 //! attaches 外字注記 suggestions to the characters that need one — all over raw
 //! bytes.
 
-use crate::coords::SpanMap;
 use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
 
 /// The full proofreading result for one document: every finding lifted into
@@ -35,17 +34,19 @@ impl Report {
 /// [`run_all`] adds the character layers on top.
 #[must_use]
 pub fn run_notation(text: &str) -> Vec<Finding> {
-    let map = SpanMap::build(text);
-    let doc = aozora::Document::new(text.to_owned());
-    let tree = doc.parse();
-    tree.diagnostics()
+    let Ok(document) = aozora::parse(text) else {
+        return Vec::new();
+    };
+    document
+        .snapshot()
+        .diagnostics()
         .iter()
         .map(|d| Finding {
             code: d.code(),
             severity: severity_from(d.severity()),
             origin: Origin::Notation,
             source: source_from(d.source()),
-            span: map.map(d.span()),
+            span: d.span().into(),
             message: d.to_string(),
             codepoint: None,
             suggestion: None,
@@ -64,8 +65,21 @@ pub fn run_notation(text: &str) -> Vec<Finding> {
 /// cannot run on undecodable input).
 #[must_use]
 pub fn run_all(raw: &[u8]) -> Report {
+    run(raw, false)
+}
+
+/// Run the full pipeline plus 青空文庫 submission-format checks.
+#[must_use]
+pub fn run_submission(raw: &[u8]) -> Report {
+    run(raw, true)
+}
+
+fn run(raw: &[u8], submission: bool) -> Report {
     let mut findings = crate::moji::file_checks::check(raw);
-    let decoded = if let Ok(text) = aozora::encoding::decode_auto(raw) {
+    if submission {
+        findings.extend(crate::moji::file_checks::check_submission(raw));
+    }
+    let decoded = if let Ok(text) = aozora::decode_auto(raw) {
         findings.extend(run_notation(&text));
         findings.extend(crate::moji::check(&text));
         findings.extend(crate::kyuji::check(&text));

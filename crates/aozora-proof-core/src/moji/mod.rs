@@ -30,6 +30,8 @@ pub mod codes {
     pub const NEEDS_GAIJI_CHUKI: &str = "aozora::char::needs_gaiji_chuki";
     /// Outside JIS X 0213 entirely.
     pub const NOT_IN_JISX0213: &str = "aozora::char::not_in_jisx0213";
+    /// A forbidden C0/DEL control character.
+    pub const CONTROL_CHARACTER: &str = "aozora::char::control_character";
 }
 
 /// The single classification a non-conformant character receives.
@@ -39,6 +41,7 @@ enum CharIssue {
     PlatformDependent,
     NeedsGaijiChuki,
     NotInJisX0213,
+    ControlCharacter,
 }
 
 impl CharIssue {
@@ -48,13 +51,16 @@ impl CharIssue {
             Self::PlatformDependent => codes::PLATFORM_DEPENDENT,
             Self::NeedsGaijiChuki => codes::NEEDS_GAIJI_CHUKI,
             Self::NotInJisX0213 => codes::NOT_IN_JISX0213,
+            Self::ControlCharacter => codes::CONTROL_CHARACTER,
         }
     }
 
     const fn severity(self) -> Severity {
         match self {
             // Outright bans / non-portable: hard errors.
-            Self::HalfwidthKatakana | Self::PlatformDependent => Severity::Error,
+            Self::HalfwidthKatakana | Self::PlatformDependent | Self::ControlCharacter => {
+                Severity::Error
+            }
             // Representable, but only as 外字注記: warn.
             Self::NeedsGaijiChuki | Self::NotInJisX0213 => Severity::Warning,
         }
@@ -74,12 +80,18 @@ impl CharIssue {
             Self::NotInJisX0213 => {
                 format!("「{c}」は JIS X 0213 にありません。外字注記または代替表記が必要です。")
             }
+            Self::ControlCharacter => {
+                format!("制御文字 U+{:04X} は本文に使用できません。", u32::from(c))
+            }
         }
     }
 }
 
 /// Classify a single character, or `None` if it is conformant (or ASCII).
 fn classify(c: char) -> Option<CharIssue> {
+    if matches!(c, '\u{0000}'..='\u{001F}' | '\u{007F}') && !matches!(c, '\r' | '\n') {
+        return Some(CharIssue::ControlCharacter);
+    }
     if c.is_ascii() {
         return None;
     }
@@ -148,6 +160,17 @@ mod tests {
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].code, codes::NEEDS_GAIJI_CHUKI);
         assert_eq!(f[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn flags_control_characters_but_not_line_endings() {
+        let findings = check("a\tb\u{7f}c\r\n");
+        assert_eq!(findings.len(), 2);
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.code == codes::CONTROL_CHARACTER)
+        );
     }
 
     #[test]

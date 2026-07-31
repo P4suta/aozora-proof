@@ -10,6 +10,7 @@ keywords.workspace     = true
 categories.workspace   = true
 readme                 = "README.md"
 description            = "The `aozora-proof` command-line proofreader for 青空文庫 text: character-level conformance checks plus the aozora parser's notation diagnostics, for local use and CI."
+publish                = false
 
 [[bin]]
 name = "aozora-proof"
