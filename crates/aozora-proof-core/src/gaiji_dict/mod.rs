@@ -64,14 +64,9 @@ pub fn search(query: &str) -> Vec<(&'static str, char)> {
 /// This is the gaiji *check layer* wired into [`crate::run_all`]: it adds no
 /// findings of its own (so it can never double-report against the
 /// [`crate::moji`] 外字注記 warning), it only turns a bare "needs 外字注記"
-/// finding into an actionable, `--fix`-applicable suggestion. Existing
+/// finding into an actionable suggestion. Existing
 /// suggestions (e.g. a 旧字体→新字体 one from [`crate::kyuji`]) are left as-is.
 pub fn annotate(findings: &mut [Finding]) {
-    // Spans already covered by another finding's suggestion — e.g. a 旧字体→新字体
-    // fix from the kyuji layer, which flags the *same* one-character span as the
-    // moji 外字注記 warning when a char is both 旧字体 and 第3/第4水準. Adding a
-    // second, overlapping suggestion there would make `--fix` apply both and
-    // corrupt the text, so we leave those spans to the existing suggestion.
     let covered: Vec<Span> = findings
         .iter()
         .filter(|f| f.suggestion.is_some())
@@ -94,20 +89,20 @@ pub fn annotate(findings: &mut [Finding]) {
         if info.descriptions.is_empty() {
             continue;
         }
-        if let Some(chuki) = info.chuki {
-            // Only offer the 注記 as a fix when it is itself character-conformant.
-            // Some 外字注記辞書 descriptions contain 機種依存 glyphs (e.g. a 「−」
-            // composition separator); suggesting such a 注記 would just trade one
-            // finding for another, so we skip it rather than offer a bad fix.
-            if crate::moji::check(&chuki).is_empty() {
-                f.suggestion = Some(Suggestion {
-                    label: format!("「{c}」→ {chuki}"),
-                    replacement: chuki,
-                    span: f.span,
-                });
-            }
+        if let Some(chuki) = info.chuki
+            && suggestion_is_conformant(&chuki)
+        {
+            f.suggestion = Some(Suggestion {
+                label: format!("「{c}」→ {chuki}"),
+                replacement: chuki,
+                span: f.span,
+            });
         }
     }
+}
+
+fn suggestion_is_conformant(text: &str) -> bool {
+    crate::moji::check(text).is_empty()
 }
 
 /// Build the 外字注記 form for a 第3/第4水準 cell:
@@ -184,13 +179,8 @@ mod tests {
     }
 
     #[test]
-    fn annotate_skips_a_chuki_whose_description_is_non_conformant() {
-        // U+20089 is 第4水準, but its 外字注記辞書 description (「尓－小」)
-        // contains a 機種依存 separator — suggesting that 注記 would trade one
-        // finding for another, so the layer offers nothing rather than a bad fix.
-        let mut findings = vec![char_finding(Some('\u{20089}'))];
-        annotate(&mut findings);
-        assert!(findings[0].suggestion.is_none());
+    fn rejects_nonconformant_suggestion_text() {
+        assert!(!suggestion_is_conformant("※［＃「①」、外字］"));
     }
 
     #[test]
@@ -209,7 +199,7 @@ mod tests {
     fn annotate_skips_a_span_already_covered_by_another_finding() {
         // Mimics a char that is both 旧字体 and 第3/第4水準: two findings on the
         // same span, one already carrying a 新字体 suggestion. The gaiji layer
-        // must leave the bare one alone, or `--fix` would apply two overlapping
+        // must leave the bare one alone, or a consumer could apply overlapping
         // replacements and corrupt the text.
         let span = Span { start: 0, end: 3 };
         let kyuji = Finding {

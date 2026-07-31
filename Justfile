@@ -4,6 +4,10 @@ set shell := ["bash", "-c"]
 default:
     @just --list
 
+# deterministic, read-only audit of every .txt below ROOT
+audit-corpus ROOT OUT="target/corpus-audit.json":
+    cargo run --locked --release -p xtask -- audit --corpus "{{ROOT}}" --out "{{OUT}}"
+
 # ---- bootstrap -------------------------------------------------------------
 
 # one-command contributor bootstrap: toolchain, dev tools, git hooks.

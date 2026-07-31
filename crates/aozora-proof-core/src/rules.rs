@@ -55,6 +55,24 @@ const RULES: &[RuleDoc] = &[
         fix: "改行コードを CR+LF に統一して保存します。",
     },
     RuleDoc {
+        code: "aozora::char::mixed_line_endings",
+        title: "改行コードが混在している",
+        rationale: "一つのファイルに CR+LF、LF、CR が混在すると、行位置の表示や変換処理が\
+                    環境によって変わります。",
+        example_bad: "一行目<CR><LF>二行目<LF>三行目",
+        example_good: "すべての行を <CR><LF> で終える",
+        fix: "エディタの改行コード変換でファイル全体を CR+LF に統一します。",
+    },
+    RuleDoc {
+        code: "aozora::char::utf8_source",
+        title: "提出ファイルが UTF-8",
+        rationale: "青空文庫の提出形式は Shift_JIS です。UTF-8 は解析できますが、提出前に\
+                    保存形式を確認する必要があります。",
+        example_bad: "UTF-8 で保存した提出ファイル",
+        example_good: "Shift_JIS で保存した提出ファイル",
+        fix: "提出時だけ Shift_JIS へ変換します。変換前に表現できない文字の指摘を解消します。",
+    },
+    RuleDoc {
         code: "aozora::char::invalid_encoding",
         title: "文字コードを判定できない",
         rationale: "入力が UTF-8 でも Shift_JIS でもデコードできませんでした。青空文庫\
@@ -70,6 +88,15 @@ const RULES: &[RuleDoc] = &[
         example_bad: "ｱｵｿﾞﾗ",
         example_good: "アオゾラ",
         fix: "対応する全角カタカナに置き換えます。",
+    },
+    RuleDoc {
+        code: "aozora::char::control_character",
+        title: "使用できない制御文字",
+        rationale: "タブ、NUL、DELなどの不可視制御文字は表示や行位置を不安定にし、本文へ\
+                    意図せず混入した可能性が高い文字です。",
+        example_bad: "語の途中にタブや NUL が入っている",
+        example_good: "必要な空白を青空文庫の規則に沿った文字で入力する",
+        fix: "底本と前後の文字を確認し、不要な制御文字を削除します。",
     },
     RuleDoc {
         code: "aozora::char::platform_dependent",
@@ -106,7 +133,8 @@ const RULES: &[RuleDoc] = &[
                     統一するか確認します。",
         example_bad: "廣島",
         example_good: "広島",
-        fix: "底本の方針に従い、必要なら新字体へ統一します（`aozora-proof check --fix`）。",
+        fix: "底本の方針に従い、必要なら新字体へ統一します。`aozora-proof check --diff`\
+              で候補位置だけを確認できます。",
     },
 ];
 
@@ -136,8 +164,11 @@ mod tests {
         let owned = [
             "aozora::char::utf8_bom",
             "aozora::char::crlf_expected",
+            "aozora::char::mixed_line_endings",
+            "aozora::char::utf8_source",
             "aozora::char::invalid_encoding",
             "aozora::char::halfwidth_katakana",
+            "aozora::char::control_character",
             "aozora::char::platform_dependent",
             "aozora::char::needs_gaiji_chuki",
             "aozora::char::not_in_jisx0213",

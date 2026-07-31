@@ -23,6 +23,8 @@ aozora-proof-wasm ──┘
 ```
 
 `cli` and `wasm` are façades over `core`; `core` bakes in `data`'s tables.
+These crates are private workspace modules. Their names and boundaries do not
+promise separate registry packages.
 
 | crate | role | boundary |
 |---|---|---|
@@ -33,17 +35,15 @@ aozora-proof-wasm ──┘
 
 The core stays pure so the *same* engine drives the CLI and the in-browser web app.
 
-> **Planned change ([ADR 0003](docs/adr/0003-character-facts-belong-upstream.md)).**
-> The character *facts* in `aozora-proof-data` — JIS 水準, 機種依存文字,
-> 旧字体↔新字体, the 外字注記辞書 — are objective writing-system data that a
-> renderer and an LSP want too, so they are migrating upstream into `aozora`.
-> `aozora-proof` keeps the *policy* (which facts are findings, at what severity)
-> and the product. Once upstream ships the API, `aozora-proof-data` is retired
-> and `core` depends on `aozora` alone (#26, #27).
+Character facts remain in the unpublished `aozora-proof-data` crate while the
+rules are validated. [ADR 0004](docs/adr/0004-promote-character-facts-on-demand.md)
+requires a real second consumer and conformance evidence before any individual
+fact becomes public `aozora` API or any internal crate becomes a release unit.
 
 ## The pipeline
 
-`core::run_all(raw: &[u8]) -> Report` is the spine
+`core::run_all(raw: &[u8]) -> Report` is the shared engine and
+`core::run_submission(raw: &[u8]) -> Report` adds submission-format policy
 ([`crates/aozora-proof-core/src/pipeline.rs`](crates/aozora-proof-core/src/pipeline.rs)):
 
 1. **File-structure checks** on the raw bytes — BOM, CRLF vs LF, encoding.
@@ -58,17 +58,15 @@ a single **decoded** coordinate frame.
 
 ### Coordinate frames
 
-Three byte-offset frames coexist, and every finding is reported in the
-**decoded** one so character and notation findings line up:
+Every finding is reported in the **decoded source** frame so character and
+notation findings line up:
 
 - **raw** — original file bytes (BOM, CRLF, original encoding).
 - **decoded** — the UTF-8 string the character layers index into.
-- **sanitized** — the parser's internal view (BOM stripped, CRLF→LF, accents
-  decomposed).
-
-[`coords::SpanMap`](crates/aozora-proof-core/src/coords.rs) lifts the parser's
-sanitized spans back into the decoded frame so they merge cleanly with character
-findings.
+The parser may sanitize internally, but `aozora` 0.5 maps diagnostics back to
+original source spans before exposing `Snapshot::diagnostics()`. This
+repository consumes those source spans and does not duplicate the parser's
+coordinate map.
 
 ## The wire contract
 
@@ -96,9 +94,9 @@ hands it to the web app verbatim.
 
 Each carries its own upstream license; see [`NOTICE`](NOTICE).
 
-Per [ADR 0003](docs/adr/0003-character-facts-belong-upstream.md), these tables
-and their `NOTICE` attributions are writing-system *facts* and are moving
-upstream into `aozora`; this section shrinks to a pointer once #27 lands.
+Per [ADR 0004](docs/adr/0004-promote-character-facts-on-demand.md), these tables
+remain experimental until a second implemented consumer demonstrates the need
+for a narrower upstream API.
 
 ## Where to add a check
 
