@@ -44,7 +44,8 @@ If distribution becomes useful, expose the smallest user-facing entry point
 that satisfies a demonstrated use case. Internal crates remain path-only unless
 an external consumer independently justifies their public API and release
 lifecycle. A release decision for one entry point does not imply publishing the
-whole `aozora-proof-*` family.
+whole `aozora-proof-*` family. Release automation is introduced only after that
+decision, so the repository does not carry a dormant publishing path.
 
 ## Consequences
 

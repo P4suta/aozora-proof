@@ -2,7 +2,6 @@
 
 <p align="center">
   <a href="https://github.com/P4suta/aozora-proof/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/P4suta/aozora-proof/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/P4suta/aozora-proof/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/P4suta/aozora-proof?display_name=tag&sort=semver"></a>
   <a href="./LICENSE-APACHE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue"></a>
   <a href="./rust-toolchain.toml"><img alt="msrv" src="https://img.shields.io/badge/rust-1.95%2B-orange"></a>
 </p>
