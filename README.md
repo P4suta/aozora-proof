@@ -1,9 +1,9 @@
 # aozora-proof
 
 `aozora-proof` is a submission-quality proofreader for
-[青空文庫](https://www.aozora.gr.jp/) text. Version 0.2 combines complete
-submission checks, deliberately narrow safe fixes, and interactive review in
-one deterministic CLI.
+[青空文庫](https://www.aozora.gr.jp/) text. It combines complete submission
+checks, deliberately narrow safe fixes, and interactive review in one
+deterministic CLI.
 
 The tool distinguishes three kinds of requirement:
 
@@ -128,14 +128,17 @@ permissions:
   attestations: read
 
 steps:
-  - uses: actions/checkout@v6
-  - uses: P4suta/aozora-proof/action@v0.2.0
+  - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+  - uses: P4suta/aozora-proof/action@v0.1.0
     with:
       files: "**/*.txt"
       orthography: mixed
       fail-on: error
-      version: "0.2.0"
 ```
+
+When the Action is pinned to a branch or full commit SHA instead of a
+`vX.Y.Z` tag, set `version: "X.Y.Z"` explicitly. A release tag resolves its
+matching binary version automatically.
 
 The repository also exposes an `aozora-proof` pre-commit hook with the
 non-directional `mixed` policy. It uses the release binary already on `PATH`
@@ -149,8 +152,7 @@ development commands, and `just ci` is the pre-push gate. See
 [ADR 0005](docs/adr/0005-submission-proofreading-cli.md).
 
 The static [web app](https://p4suta.github.io/aozora-proof/) uses the same
-schema-v2 catalog through WebAssembly. Its editor workflow is intentionally
-unchanged in 0.2.
+schema-v2 catalog through WebAssembly.
 
 ## License
 

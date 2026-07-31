@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "aozora-proof-cli"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "anstyle",
  "aozora-proof-core",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "aozora-proof-core"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "aozora",
  "aozora-proof-data",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "aozora-proof-data"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "encoding_rs",
  "thiserror",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "aozora-proof-wasm"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "aozora-proof-core",
  "serde_json",

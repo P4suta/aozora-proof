@@ -11,20 +11,21 @@ inputs:
     required: false
     default: ""
   tools:
-    description: 'Comma-separated cargo tools for taiki-e/install-action, e.g. "cargo-nextest@0.9". Pin to dev-tools.txt.'
+    description: 'Comma-separated cargo tools for taiki-e/install-action, e.g. "cargo-nextest@0.9.137". Pin to mise config.'
     required: false
     default: ""
 
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@1.95.0
+    - uses: dtolnay/rust-toolchain@f133eefe930d61f0d9371efd474daf0125ed3dd1 # 1.95.0
       with:
+        toolchain: "1.95.0"
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
-    - uses: rui314/setup-mold@v1
-    - uses: Swatinem/rust-cache@v2
+    - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+    - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
     - if: ${{ inputs.tools != '' }}
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
       with:
         tool: ${{ inputs.tools }}

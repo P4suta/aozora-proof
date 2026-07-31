@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "version": "0.1.0",
+  "reportSchemaVersion": 2,
+  "artifacts": [
+    {
+      "target": "x86_64-unknown-linux-musl",
+      "platform": "linux-x86_64",
+      "archive": "linux-x86_64.tar.gz",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sbom": "linux-x86_64.spdx.json"
+    },
+    {
+      "target": "aarch64-unknown-linux-musl",
+      "platform": "linux-aarch64",
+      "archive": "linux-aarch64.tar.gz",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sbom": "linux-aarch64.spdx.json"
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "platform": "macos-x86_64",
+      "archive": "macos-x86_64.tar.gz",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "sbom": "macos-x86_64.spdx.json"
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "platform": "macos-aarch64",
+      "archive": "macos-aarch64.tar.gz",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sbom": "macos-aarch64.spdx.json"
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "platform": "windows-x86_64",
+      "archive": "windows-x86_64.tar.gz",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "sbom": "windows-x86_64.spdx.json"
+    }
+  ]
+}

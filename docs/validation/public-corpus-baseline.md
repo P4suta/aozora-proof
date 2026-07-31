@@ -59,10 +59,10 @@ suggesting an unsafe blanket deletion. The half-width punctuation and
 platform-dependent characters still violate the submission character set;
 each occurrence requires confirmation against the source book before editing.
 
-Version 0.2 does not promote these broad probes wholesale. It emits a review
+Version 0.1 does not promote these broad probes wholesale. It emits a review
 finding only for an ASCII space between Japanese characters or an ASCII
 bracket touching Japanese text; the full-width tilde probe remains audit-only.
-The historical counts above therefore are not expected 0.2 finding counts.
+The historical counts above therefore are not expected 0.1 finding counts.
 
 This baseline is evidence for continued validation, not a release decision or
 a claim that every finding is a manuscript defect. The aggregate report is

@@ -13,12 +13,15 @@ use aozora_proof_core::{CheckError, FindingSource, Span, run_submission};
 use serde::Serialize;
 use syn::visit::Visit;
 
+mod release;
+
 const AUDIT_SCHEMA_VERSION: u32 = 2;
 const DEFAULT_SAMPLES: usize = 5;
 
 #[derive(Debug)]
 enum Command {
     Audit(AuditArgs),
+    Release(Vec<std::ffi::OsString>),
     RustPolicy,
 }
 
@@ -33,6 +36,8 @@ struct AuditArgs {
 enum XtaskError {
     #[error("{message}")]
     Usage { message: String },
+    #[error("{message}")]
+    Release { message: String },
     #[error("argument {argument:?} must be UTF-8")]
     NonUtf8Argument { argument: std::ffi::OsString },
     #[error("invalid sample count {value:?}")]
@@ -111,6 +116,7 @@ fn parse_args() -> Result<Command, XtaskError> {
     let mut args = env::args_os().skip(1);
     match args.next().as_deref().and_then(std::ffi::OsStr::to_str) {
         Some("audit") => parse_audit_args(args),
+        Some("release") => Ok(Command::Release(args.collect())),
         Some("lint") => {
             if args.next().as_deref() != Some(std::ffi::OsStr::new("rust-policy"))
                 || args.next().is_some()
@@ -120,7 +126,7 @@ fn parse_args() -> Result<Command, XtaskError> {
             Ok(Command::RustPolicy)
         }
         _ => Err(usage(
-            "usage: cargo xtask audit --corpus ROOT [--out FILE] [--samples N]\n       cargo xtask lint rust-policy",
+            "usage: cargo xtask audit --corpus ROOT [--out FILE] [--samples N]\n       cargo xtask lint rust-policy\n       cargo xtask release <sync|check|preflight|qualify|artifact-check>",
         )),
     }
 }
@@ -169,6 +175,12 @@ fn parse_audit_args(
 fn run(command: Command) -> Result<Option<PathBuf>, XtaskError> {
     match command {
         Command::Audit(args) => run_audit(args).map(Some),
+        Command::Release(args) => {
+            let message = release::run(args.into_iter())
+                .map_err(|message| XtaskError::Release { message })?;
+            eprintln!("{message}");
+            Ok(None)
+        }
         Command::RustPolicy => {
             let root = env::current_dir().map_err(|source| XtaskError::Io {
                 path: PathBuf::from("."),

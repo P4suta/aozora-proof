@@ -11,7 +11,7 @@ audit-corpus ROOT OUT="target/corpus-audit.json":
 # ---- bootstrap -------------------------------------------------------------
 
 # one-command contributor bootstrap: toolchain, dev tools, git hooks.
-setup: setup-toolchain setup-tools hooks
+setup: setup-tools setup-toolchain hooks
     @echo "setup complete — try 'just doctor', then 'just ci'."
 
 # materialise the pinned toolchain + the wasm target the web app needs.
@@ -20,10 +20,9 @@ setup-toolchain:
     rustup target add wasm32-unknown-unknown
 
 # install every pinned dev tool from the single mise manifest
-# (mise.toml + .config/mise/config.toml). Replaces the old
-# dev-tools.txt + cargo-binstall path.
+# (mise.toml + .config/mise/config.toml + mise.lock).
 setup-tools:
-    mise install
+    MISE_LOCKED=1 mise install
 
 # report dev-tool + toolchain status against what CI pins (read-only).
 doctor:
@@ -75,7 +74,7 @@ test-portable *ARGS:
 # run a libFuzzer target (needs nightly + cargo-fuzz; see fuzz/).
 # e.g. `just fuzz run_all 120` or `just fuzz gaiji`. Mirrors fuzz.yml.
 fuzz target="run_all" secs="60":
-    cargo +nightly fuzz run {{ target }} -- -max_total_time={{ secs }}
+    cargo +nightly-2026-07-15 fuzz run {{ target }} -- -max_total_time={{ secs }}
 
 # auto-format Rust, TOML, and web assets (taplo/pnpm skipped if not installed).
 fmt:
@@ -123,7 +122,7 @@ cov:
     @echo "cov: lcov.info + target/llvm-cov/html written"
 
 # everything CI's gating jobs run (test + lint + deny). Mirrors ci.yml.
-ci: fmt-check rust-policy clippy test doc deny typos lint-toml lint-actions lint-web
+ci: release-check fmt-check rust-policy clippy test doc deny typos lint-toml lint-actions lint-web
     @echo "ci: gating checks passed (use 'just ci-full' to also run the coverage job)"
 
 # full CI parity — also reproduces the coverage job (ci.yml `coverage`).
@@ -143,8 +142,25 @@ ci-release:
       "$release_target/release/aozora-proof" completions "$shell" > "$release_dir/aozora-proof.$shell"
     done
     test -s "$release_dir/aozora-proof.1"
-    "$release_target/release/aozora-proof" --version | grep -q '^aozora-proof 0\.2\.0 '
+    release_version=$(tr -d '[:space:]' < version.txt)
+    "$release_target/release/aozora-proof" --version | grep -Fq "aozora-proof ${release_version} "
     echo "ci-release: native binary, man page, and completions passed"
+
+# ---- release ---------------------------------------------------------------
+
+# check version, manifest, changelog, tags, Cargo metadata, and both lockfiles.
+release-check:
+    cargo run --locked -p xtask -- release check
+
+# synchronize a Release Please PR after version.txt has changed.
+release-sync:
+    cargo run --locked -p xtask -- release sync
+    cargo metadata --locked --no-deps --format-version 1 >/dev/null
+    cargo metadata --locked --manifest-path fuzz/Cargo.toml --no-deps --format-version 1 >/dev/null
+
+# verify GitHub Environments, secrets, rulesets, immutable releases, and qualification.
+release-preflight *ARGS:
+    cargo run --locked -p xtask -- release preflight {{ ARGS }}
 
 # ---- web app ---------------------------------------------------------------
 
