@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::error::Error;
-use std::fmt;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -13,26 +11,37 @@ use crate::cli::{ColorChoice, Format, LanguageArg, OrthographyArg, SeverityArg};
 
 const PROJECT_FILE: &str = ".aozora-proof.toml";
 
-#[derive(Debug)]
-pub(crate) struct ConfigError {
-    message: String,
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ConfigError {
+    #[error("{message}")]
+    Message { message: String },
+    #[error("{context}: {source}")]
+    Io {
+        context: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("{}: invalid configuration: {source}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+    #[error("environment variable {name} is invalid: {source}")]
+    Environment {
+        name: &'static str,
+        #[source]
+        source: env::VarError,
+    },
 }
 
 impl ConfigError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self {
+        Self::Message {
             message: message.into(),
         }
     }
 }
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for ConfigError {}
 
 #[derive(Debug, Clone)]
 pub(crate) struct Resolved {
@@ -206,9 +215,10 @@ fn load_configuration(
     explicit_config: Option<&Path>,
 ) -> Result<(PathBuf, Option<PathBuf>, ConfigFile, Sources), ConfigError> {
     let user_config = user_config_path()?;
-    let project_config = explicit_config
-        .map(Path::to_path_buf)
-        .or_else(|| find_project_config(paths));
+    let project_config = match explicit_config {
+        Some(path) => Some(path.to_path_buf()),
+        None => find_project_config(paths)?,
+    };
     let mut merged = ConfigFile::default();
     let mut sources = Sources {
         orthography: "unset".to_owned(),
@@ -354,11 +364,11 @@ pub(crate) fn require_orthography(
     eprint!("Orthography [modern/traditional/mixed]: ");
     io::stderr()
         .flush()
-        .map_err(|error| ConfigError::new(error.to_string()))?;
+        .map_err(|source| config_io("could not write the orthography prompt", source))?;
     let mut answer = String::new();
     io::stdin()
         .read_line(&mut answer)
-        .map_err(|error| ConfigError::new(error.to_string()))?;
+        .map_err(|source| config_io("could not read the orthography prompt", source))?;
     resolved.orthography = Some(parse_orthography(answer.trim())?);
     "interactive prompt".clone_into(&mut resolved.sources.orthography);
     Ok(())
@@ -371,21 +381,29 @@ pub(crate) fn init(user: bool) -> Result<PathBuf, ConfigError> {
     eprint!("Orthography [modern/traditional/mixed]: ");
     io::stderr()
         .flush()
-        .map_err(|error| ConfigError::new(error.to_string()))?;
+        .map_err(|source| config_io("could not write the initialization prompt", source))?;
     let mut answer = String::new();
     io::stdin()
         .read_line(&mut answer)
-        .map_err(|error| ConfigError::new(error.to_string()))?;
+        .map_err(|source| config_io("could not read the initialization prompt", source))?;
     let orthography = parse_orthography(answer.trim())?;
     let path = if user {
         user_config_path()?
     } else {
         env::current_dir()
-            .map_err(|error| ConfigError::new(error.to_string()))?
+            .map_err(|source| config_io("could not resolve the current directory", source))?
             .join(PROJECT_FILE)
     };
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| ConfigError::new(error.to_string()))?;
+        fs::create_dir_all(parent).map_err(|source| {
+            config_io(
+                format!(
+                    "{}: could not create the configuration directory",
+                    parent.display()
+                ),
+                source,
+            )
+        })?;
     }
     let body = format!(
         "orthography = \"{}\"\nfail-on = \"error\"\nformat = \"auto\"\nlang = \"en\"\n",
@@ -393,11 +411,18 @@ pub(crate) fn init(user: bool) -> Result<PathBuf, ConfigError> {
     );
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
-    let mut file = options
-        .open(&path)
-        .map_err(|error| ConfigError::new(format!("{}: {error}", path.display())))?;
-    file.write_all(body.as_bytes())
-        .map_err(|error| ConfigError::new(error.to_string()))?;
+    let mut file = options.open(&path).map_err(|source| {
+        config_io(
+            format!("{}: could not create configuration", path.display()),
+            source,
+        )
+    })?;
+    file.write_all(body.as_bytes()).map_err(|source| {
+        config_io(
+            format!("{}: could not write configuration", path.display()),
+            source,
+        )
+    })?;
     Ok(path)
 }
 
@@ -476,8 +501,9 @@ pub(crate) fn user_config_path() -> Result<PathBuf, ConfigError> {
     )
 }
 
-fn find_project_config(paths: &[PathBuf]) -> Option<PathBuf> {
-    let current = env::current_dir().ok()?;
+fn find_project_config(paths: &[PathBuf]) -> Result<Option<PathBuf>, ConfigError> {
+    let current = env::current_dir()
+        .map_err(|source| config_io("could not resolve the current directory", source))?;
     let first = paths
         .iter()
         .find(|path| path.as_os_str() != "-")
@@ -496,21 +522,28 @@ fn find_project_config(paths: &[PathBuf]) -> Option<PathBuf> {
     } else {
         first.as_path()
     };
-    start
+    Ok(start
         .ancestors()
         .map(|ancestor| ancestor.join(PROJECT_FILE))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.is_file()))
 }
 
 fn load(path: &Path) -> Result<ConfigFile, ConfigError> {
-    let content = fs::read_to_string(path)
-        .map_err(|error| ConfigError::new(format!("{}: {error}", path.display())))?;
-    let value: toml::Value = toml::from_str(&content)
-        .map_err(|error| ConfigError::new(format!("{}: {error}", path.display())))?;
+    let content = fs::read_to_string(path).map_err(|source| {
+        config_io(
+            format!("{}: could not read configuration", path.display()),
+            source,
+        )
+    })?;
+    let value: toml::Value = toml::from_str(&content).map_err(|source| ConfigError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })?;
     validate_config_keys(&value)?;
-    value
-        .try_into()
-        .map_err(|error| ConfigError::new(format!("{}: {error}", path.display())))
+    value.try_into().map_err(|source| ConfigError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn validate_config_keys(value: &toml::Value) -> Result<(), ConfigError> {
@@ -604,31 +637,43 @@ fn merge(target: &mut ConfigFile, source: ConfigFile, sources: &mut Sources, lab
 }
 
 fn apply_env(values: &mut Values, sources: &mut Sources) -> Result<(), ConfigError> {
-    if let Some(value) = env_value("AOZORA_PROOF_ORTHOGRAPHY") {
+    if let Some(value) = env_value("AOZORA_PROOF_ORTHOGRAPHY")? {
         values.orthography = Some(parse_orthography(&value)?);
         "AOZORA_PROOF_ORTHOGRAPHY".clone_into(&mut sources.orthography);
     }
-    if let Some(value) = env_value("AOZORA_PROOF_FAIL_ON") {
+    if let Some(value) = env_value("AOZORA_PROOF_FAIL_ON")? {
         values.fail_on = parse_severity(&value)?;
         "AOZORA_PROOF_FAIL_ON".clone_into(&mut sources.fail_on);
     }
-    if let Some(value) = env_value("AOZORA_PROOF_FORMAT") {
+    if let Some(value) = env_value("AOZORA_PROOF_FORMAT")? {
         values.format = parse_format(&value)?;
         "AOZORA_PROOF_FORMAT".clone_into(&mut sources.format);
     }
-    if let Some(value) = env_value("AOZORA_PROOF_COLOR") {
+    if let Some(value) = env_value("AOZORA_PROOF_COLOR")? {
         values.color = parse_color(&value)?;
         "AOZORA_PROOF_COLOR".clone_into(&mut sources.color);
     }
-    if let Some(value) = env_value("AOZORA_PROOF_LANG") {
+    if let Some(value) = env_value("AOZORA_PROOF_LANG")? {
         values.language = parse_language(&value)?;
         "AOZORA_PROOF_LANG".clone_into(&mut sources.language);
     }
     Ok(())
 }
 
-fn env_value(name: &str) -> Option<String> {
-    env::var(name).ok().filter(|value| !value.is_empty())
+fn env_value(name: &'static str) -> Result<Option<String>, ConfigError> {
+    match env::var(name) {
+        Ok(value) if value.is_empty() => Ok(None),
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(source) => Err(ConfigError::Environment { name, source }),
+    }
+}
+
+fn config_io(context: impl Into<String>, source: io::Error) -> ConfigError {
+    ConfigError::Io {
+        context: context.into(),
+        source,
+    }
 }
 
 fn validate_rule_codes(config: &ConfigFile) -> Result<(), ConfigError> {
@@ -778,15 +823,18 @@ fn levenshtein(left: &str, right: &str) -> usize {
     for (row, left_char) in left.chars().enumerate() {
         let mut diagonal = row;
         if let Some(first) = costs.first_mut() {
-            *first = row + 1;
+            *first = row.saturating_add(1);
         }
         for (column, right_char) in right.chars().enumerate() {
-            let above = costs.get(column + 1).copied().unwrap_or(usize::MAX);
+            let next_column = column.saturating_add(1);
+            let above = costs.get(next_column).copied().unwrap_or(usize::MAX);
             let left_cost = costs.get(column).copied().unwrap_or(usize::MAX);
-            let replacement = diagonal + usize::from(left_char != right_char);
+            let replacement = diagonal.saturating_add(usize::from(left_char != right_char));
             diagonal = above;
-            if let Some(cell) = costs.get_mut(column + 1) {
-                *cell = replacement.min(above + 1).min(left_cost + 1);
+            if let Some(cell) = costs.get_mut(next_column) {
+                *cell = replacement
+                    .min(above.saturating_add(1))
+                    .min(left_cost.saturating_add(1));
             }
         }
     }

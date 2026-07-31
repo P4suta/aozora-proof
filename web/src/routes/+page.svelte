@@ -10,10 +10,19 @@
 
 	let text = $state('①俱來髙');
 	let ready = $state(false);
+	let initializationError = $state<string>();
+
+	const checkState = $derived.by(() => {
+		if (initializationError) {
+			return { status: 'error' as const, message: initializationError };
+		}
+		if (!ready) return { status: 'loading' as const };
+		return check(text);
+	});
 
 	const findings = $derived.by(() => {
-		if (!ready) return [];
-		const data = check(text);
+		if (checkState.status !== 'ready') return [];
+		const data = [...checkState.findings];
 		data.sort(
 			(a, b) =>
 				(SEV[a.severity]?.order ?? 9) - (SEV[b.severity]?.order ?? 9) ||
@@ -27,8 +36,12 @@
 	});
 
 	onMount(async () => {
-		await ensureReady();
-		ready = true;
+		try {
+			await ensureReady();
+			ready = true;
+		} catch (error) {
+			initializationError = error instanceof Error ? error.message : String(error);
+		}
 	});
 </script>
 
@@ -51,7 +64,11 @@
 	></textarea>
 
 	<ul aria-live="polite" class="mt-4">
-		{#if findings.length === 0}
+		{#if checkState.status === 'error'}
+			<li class="py-2 text-error">校正処理に失敗しました: {checkState.message}</li>
+		{:else if checkState.status === 'loading'}
+			<li class="py-2 text-muted">校正エンジンを読み込んでいます…</li>
+		{:else if findings.length === 0}
 			<li class="py-2 text-muted">✓ 指摘はありません</li>
 		{:else}
 			{#each findings as f, i (i)}

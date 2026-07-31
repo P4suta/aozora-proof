@@ -12,6 +12,7 @@ that links back.
 | [0003](./adr/0003-character-facts-belong-upstream.md) | Character-fact data belongs to `aozora` | accepted |
 | [0004](./adr/0004-promote-character-facts-on-demand.md) | Promote character facts only after demonstrated demand | accepted |
 | [0005](./adr/0005-submission-proofreading-cli.md) | Submission-quality proofreading CLI | accepted |
+| [0006](./adr/0006-static-rust-failure-invariants.md) | Static Rust failure and safety invariants | accepted |
 
 ## Authoring a new ADR
 

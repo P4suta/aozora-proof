@@ -6,6 +6,9 @@ use aozora_proof_core::{
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let report = run_submission_with_orthography(data, Orthography::Mixed);
-    let _ = serialize_report(&report);
+    if let Ok(report) = run_submission_with_orthography(data, Orthography::Mixed) {
+        match std::hint::black_box(serialize_report(&report)) {
+            Ok(_) | Err(_) => {}
+        }
+    }
 });

@@ -4,11 +4,15 @@
 //! use aozora_proof_core::{
 //!     Orthography, run_submission_with_orthography, serialize_report,
 //! };
+//! # fn main() -> Result<(), String> {
 //!
 //! let report =
-//!     run_submission_with_orthography("青空\r\n".as_bytes(), Orthography::Mixed);
-//! let json = serialize_report(&report);
+//!     run_submission_with_orthography("青空\r\n".as_bytes(), Orthography::Mixed)
+//!         .map_err(|error| error.to_string())?;
+//! let json = serialize_report(&report).map_err(|error| error.to_string())?;
 //! assert!(json.starts_with(r#"{"schemaVersion":2"#));
+//! # Ok(())
+//! # }
 //! ```
 
 #![forbid(unsafe_code)]
@@ -20,6 +24,7 @@
     )
 )]
 
+mod error;
 pub mod finding;
 pub mod fix;
 pub mod gaiji_dict;
@@ -32,6 +37,7 @@ pub mod rules;
 pub mod submission;
 pub mod wire;
 
+pub use error::CheckError;
 pub use finding::{
     DetectionClass, Finding, FindingDetails, FindingSource, FixAlternative, FixApplicability,
     FixOperation, Origin, Position, RuleCategory, SCHEMA_VERSION, Severity, Span, TextEdit,
@@ -43,4 +49,4 @@ pub use pipeline::{
     Report, run_all, run_notation, run_submission, run_submission_with_orthography,
 };
 pub use rules::{OfficialItem, RuleDoc, all_rules, explain, official_items};
-pub use wire::{ReportFile, serialize_report, serialize_reports};
+pub use wire::{ReportFile, serialize_report, serialize_reports, serialize_reports_to_writer};

@@ -89,6 +89,9 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+rust-policy:
+    cargo run --locked -p xtask -- lint rust-policy
+
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
@@ -120,7 +123,7 @@ cov:
     @echo "cov: lcov.info + target/llvm-cov/html written"
 
 # everything CI's gating jobs run (test + lint + deny). Mirrors ci.yml.
-ci: fmt-check clippy test doc deny typos lint-toml lint-actions lint-web
+ci: fmt-check rust-policy clippy test doc deny typos lint-toml lint-actions lint-web
     @echo "ci: gating checks passed (use 'just ci-full' to also run the coverage job)"
 
 # full CI parity — also reproduces the coverage job (ci.yml `coverage`).

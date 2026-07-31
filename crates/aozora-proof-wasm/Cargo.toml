@@ -22,6 +22,7 @@ crate-type = ["lib", "cdylib"]
 [dependencies]
 aozora-proof-core = { workspace = true }
 serde_json        = { workspace = true }
+thiserror         = { workspace = true }
 
 # wasm-bindgen is pulled in only when targeting wasm32, so host builds of the
 # workspace skip it and compile the exports as plain functions.

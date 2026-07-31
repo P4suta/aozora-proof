@@ -1,11 +1,12 @@
 //! Deterministic schema-v2 machine report.
 
 use std::collections::BTreeMap;
+use std::io;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::SCHEMA_VERSION;
-use crate::finding::{Finding, FixOperation, Position, Span};
+use crate::finding::{Finding, FixOperation, Span};
 use crate::pipeline::Report;
 use crate::rules;
 
@@ -75,7 +76,7 @@ struct FindingWire<'a> {
     severity: &'static str,
     source: &'static str,
     utf8_byte_span: SpanWire,
-    position: PositionWire,
+    position: PositionWire<'a>,
     canonical_message: &'a str,
     data: &'a BTreeMap<String, String>,
     authority_url: &'a str,
@@ -99,11 +100,37 @@ impl From<Span> for SpanWire {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PositionWire {
+struct PositionData {
     line: usize,
     column: usize,
     end_line: usize,
     end_column: usize,
+}
+
+struct PositionWire<'a> {
+    finding: &'a Finding,
+    decoded: &'a str,
+}
+
+impl Serialize for PositionWire<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let start = self
+            .finding
+            .position(self.decoded)
+            .map_err(<S::Error as serde::ser::Error>::custom)?;
+        let end = crate::finding::position(self.decoded, self.finding.span.end)
+            .map_err(<S::Error as serde::ser::Error>::custom)?;
+        PositionData {
+            line: start.line,
+            column: start.column,
+            end_line: end.line,
+            end_column: end.column,
+        }
+        .serialize(serializer)
+    }
 }
 
 #[derive(Serialize)]
@@ -123,8 +150,11 @@ struct EditWire<'a> {
 }
 
 /// Serialize one in-memory report using the path `<memory>`.
-#[must_use]
-pub fn serialize_report(report: &Report) -> String {
+///
+/// # Errors
+///
+/// Returns the JSON serializer error without substituting fallback output.
+pub fn serialize_report(report: &Report) -> Result<String, serde_json::Error> {
     serialize_reports(&[ReportFile {
         path: "<memory>",
         report,
@@ -132,14 +162,33 @@ pub fn serialize_report(report: &Report) -> String {
 }
 
 /// Serialize ordered file reports as canonical compact JSON.
-#[must_use]
-pub fn serialize_reports(files: &[ReportFile<'_>]) -> String {
+///
+/// # Errors
+///
+/// Returns the JSON serializer error without substituting fallback output.
+pub fn serialize_reports(files: &[ReportFile<'_>]) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&machine_report(files))
+}
+
+/// Serialize ordered file reports to a writer.
+///
+/// # Errors
+///
+/// Returns the serializer or writer error without substituting fallback JSON.
+pub fn serialize_reports_to_writer<W: io::Write>(
+    writer: W,
+    files: &[ReportFile<'_>],
+) -> Result<(), serde_json::Error> {
+    serde_json::to_writer(writer, &machine_report(files))
+}
+
+fn machine_report<'a>(files: &[ReportFile<'a>]) -> MachineReport<'a> {
     let file_wires: Vec<FileWire<'_>> = files
         .iter()
         .map(|file| file_wire(file.path, file.report))
         .collect();
     let summary = summary(&file_wires);
-    let report = MachineReport {
+    MachineReport {
         schema_version: SCHEMA_VERSION,
         tool: ToolWire {
             name: "aozora-proof",
@@ -147,12 +196,7 @@ pub fn serialize_reports(files: &[ReportFile<'_>]) -> String {
         },
         summary,
         files: file_wires,
-    };
-    serde_json::to_string(&report).unwrap_or_else(|_| {
-        String::from(
-            r#"{"schemaVersion":2,"tool":{"name":"aozora-proof","version":"0.2.0"},"summary":{"files":0,"findings":0,"errors":0,"warnings":0,"notes":0,"conformantFiles":0,"reviewPendingFiles":0,"manualChecks":[]},"files":[]}"#,
-        )
-    })
+    }
 }
 
 fn file_wire<'a>(path: &'a str, report: &'a Report) -> FileWire<'a> {
@@ -172,15 +216,13 @@ fn file_wire<'a>(path: &'a str, report: &'a Report) -> FileWire<'a> {
 }
 
 fn finding_wire<'a>(finding: &'a Finding, decoded: &'a str) -> FindingWire<'a> {
-    let start = finding.position(decoded);
-    let end = crate::finding::position(decoded, finding.span.end);
     FindingWire {
         code: finding.code,
         category: finding.category.as_wire_str(),
         severity: finding.severity.as_wire_str(),
         source: finding.source.as_wire_str(),
         utf8_byte_span: finding.span.into(),
-        position: position_wire(start, end),
+        position: PositionWire { finding, decoded },
         canonical_message: &finding.message,
         data: &finding.data,
         authority_url: finding.authority_url,
@@ -203,15 +245,6 @@ fn finding_wire<'a>(finding: &'a Finding, decoded: &'a str) -> FindingWire<'a> {
                 },
             })
             .collect(),
-    }
-}
-
-const fn position_wire(start: Position, end: Position) -> PositionWire {
-    PositionWire {
-        line: start.line,
-        column: start.column,
-        end_line: end.line,
-        end_column: end.column,
     }
 }
 
@@ -253,8 +286,9 @@ mod tests {
 
     #[test]
     fn schema_v2_contains_file_metadata_and_canonical_message() {
-        let report = run_submission_with_orthography("ｱ\n".as_bytes(), Orthography::Modern);
-        let json = serialize_report(&report);
+        let report = run_submission_with_orthography("ｱ\n".as_bytes(), Orthography::Modern)
+            .expect("valid report");
+        let json = serialize_report(&report).expect("serializable report");
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         assert_eq!(
             value
@@ -273,5 +307,44 @@ mod tests {
         assert!(finding.get("canonicalMessage").is_some());
         assert!(finding.get("utf8ByteSpan").is_some());
         assert!(finding.get("position").is_some());
+    }
+
+    #[derive(Debug)]
+    struct RejectingWriter;
+
+    impl io::Write for RejectingWriter {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("writer rejected output"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn writer_failure_is_not_replaced_with_fallback_json() {
+        let report =
+            run_submission_with_orthography(b"", Orthography::Mixed).expect("valid report");
+        let error = serialize_reports_to_writer(
+            RejectingWriter,
+            &[ReportFile {
+                path: "<memory>",
+                report: &report,
+            }],
+        )
+        .expect_err("writer must fail");
+        assert!(error.is_io());
+    }
+
+    #[test]
+    fn invalid_report_coordinates_are_not_replaced_with_fallback_json() {
+        let mut report = run_submission_with_orthography("ｱ\n".as_bytes(), Orthography::Mixed)
+            .expect("valid report");
+        let finding = report.findings.first_mut().expect("finding");
+        finding.span.end = u32::MAX;
+
+        let error = serialize_report(&report).expect_err("invalid coordinates must fail");
+        assert!(error.is_data());
     }
 }

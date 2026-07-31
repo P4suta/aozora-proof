@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::CheckError;
+
 /// Machine-report schema version.
 pub const SCHEMA_VERSION: u32 = 2;
 
@@ -153,6 +155,28 @@ impl From<aozora::Span> for Span {
             start: value.start,
             end: value.end,
         }
+    }
+}
+
+impl Span {
+    /// Convert decoded byte offsets without truncation or clamping.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::SpanOverflow`] when either endpoint cannot be
+    /// represented by the wire-format coordinate type.
+    pub fn try_from_usize(start: usize, end: usize) -> Result<Self, CheckError> {
+        let start_u32 = u32::try_from(start).map_err(|source| CheckError::SpanOverflow {
+            start,
+            end,
+            source,
+        })?;
+        let end_u32 =
+            u32::try_from(end).map_err(|source| CheckError::SpanOverflow { start, end, source })?;
+        Ok(Self {
+            start: start_u32,
+            end: end_u32,
+        })
     }
 }
 
@@ -322,6 +346,8 @@ pub struct Finding {
     pub code: &'static str,
     /// Catalog category.
     pub category: RuleCategory,
+    /// Catalog detection class.
+    pub detection: DetectionClass,
     /// Severity after configuration.
     pub severity: Severity,
     /// Producing engine layer.
@@ -346,18 +372,22 @@ pub struct Finding {
 
 impl Finding {
     /// Construct a proofreader-owned finding from catalog metadata.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::UnknownRule`] when `code` is absent from the
+    /// proofreader-owned catalog.
     pub fn from_rule(
         code: &'static str,
         origin: Origin,
         span: Span,
         details: FindingDetails,
-    ) -> Self {
-        let rule = crate::rules::explain(code).unwrap_or_else(crate::rules::upstream_rule);
-        debug_assert_eq!(rule.code, code);
-        Self {
+    ) -> Result<Self, CheckError> {
+        let rule = crate::rules::explain(code).ok_or(CheckError::UnknownRule { code })?;
+        Ok(Self {
             code,
             category: rule.category,
+            detection: rule.detection,
             severity: rule.default_severity,
             origin,
             source: FindingSource::Source,
@@ -368,13 +398,13 @@ impl Finding {
             authority_url: rule.authority_url,
             codepoint: details.codepoint,
             fixes: details.fixes,
-        }
+        })
     }
 
     /// Trailing code token used by SARIF rule names.
     #[must_use]
     pub fn kind(&self) -> &str {
-        self.code.rsplit("::").next().unwrap_or(self.code)
+        self.code.rsplit("::").next().map_or(self.code, |kind| kind)
     }
 
     /// Localized message for a human renderer.
@@ -388,16 +418,31 @@ impl Finding {
     }
 
     /// One-based position for this finding.
-    #[must_use]
-    pub fn position(&self, decoded: &str) -> Position {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError`] when the finding span is invalid for `decoded`.
+    pub fn position(&self, decoded: &str) -> Result<Position, CheckError> {
         position(decoded, self.span.start)
     }
 }
 
 /// Convert a decoded UTF-8 byte offset to a one-based Unicode position.
-#[must_use]
-pub fn position(text: &str, byte: u32) -> Position {
-    let limit = usize::try_from(byte).unwrap_or(usize::MAX);
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when the offset is outside `text`, is not a UTF-8
+/// boundary, or coordinate counting overflows.
+pub fn position(text: &str, byte: u32) -> Result<Position, CheckError> {
+    let limit = usize::try_from(byte)
+        .map_err(|source| CheckError::CoordinateConversion { byte, source })?;
+    if limit > text.len() || !text.is_char_boundary(limit) {
+        return Err(CheckError::InvalidSpan {
+            start: byte,
+            end: byte,
+            source_len: text.len(),
+        });
+    }
     let mut line = 1usize;
     let mut column = 1usize;
     for (offset, character) in text.char_indices() {
@@ -405,11 +450,17 @@ pub fn position(text: &str, byte: u32) -> Position {
             break;
         }
         if character == '\n' {
-            line += 1;
+            line = line.checked_add(1).ok_or(CheckError::CoordinateOverflow {
+                operation: "counting source lines",
+            })?;
             column = 1;
         } else {
-            column += 1;
+            column = column
+                .checked_add(1)
+                .ok_or(CheckError::CoordinateOverflow {
+                    operation: "counting source columns",
+                })?;
         }
     }
-    Position { line, column }
+    Ok(Position { line, column })
 }

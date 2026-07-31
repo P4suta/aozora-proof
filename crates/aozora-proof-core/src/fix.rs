@@ -1,45 +1,71 @@
 //! Safe-fix planning and lossless Shift_JIS materialization.
 
-use std::borrow::Cow;
-use std::error::Error;
-use std::fmt;
-
 use encoding_rs::SHIFT_JIS;
+use std::borrow::Cow;
 
+use crate::CheckError;
 use crate::finding::{FixApplicability, FixOperation, TextEdit};
 use crate::orthography::Orthography;
 
 const FIX_POINT_LIMIT: usize = 8;
 
 /// Failure to construct one atomic safe-fix result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum FixError {
     /// The input cannot be decoded without replacement.
-    Decode,
+    #[error("input cannot be decoded as UTF-8 or Shift_JIS")]
+    Decode {
+        /// Upstream decoder failure.
+        #[source]
+        source: aozora::DecodeError,
+    },
+    /// The proofreading pipeline could not produce a complete report.
+    #[error("proofreading failed while planning fixes")]
+    Check {
+        /// Checked pipeline failure.
+        #[source]
+        source: CheckError,
+    },
     /// Two safe edits target overlapping decoded ranges.
+    #[error("safe edits overlap")]
     OverlappingEdits,
     /// A text edit does not lie on valid UTF-8 boundaries.
+    #[error("a safe edit has an invalid UTF-8 range")]
     InvalidEdit,
+    /// A wire edit offset cannot be represented on the host.
+    #[error("safe edit offset cannot be represented on this host")]
+    EditOffset {
+        /// Failed integer conversion.
+        #[source]
+        source: std::num::TryFromIntError,
+    },
     /// Safe rules did not converge.
+    #[error("safe fixes did not reach a fixed point")]
     NonConvergent,
     /// The final text cannot round-trip through Shift_JIS.
+    #[error("fixed text cannot round-trip through Shift_JIS")]
     ShiftJisLossy,
+    /// Pass accounting exceeded the host coordinate type.
+    #[error("safe-fix pass accounting overflowed")]
+    PassOverflow,
 }
 
-impl fmt::Display for FixError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::Decode => "input cannot be decoded as UTF-8 or Shift_JIS",
-            Self::OverlappingEdits => "safe edits overlap",
-            Self::InvalidEdit => "a safe edit has an invalid UTF-8 range",
-            Self::NonConvergent => "safe fixes did not reach a fixed point",
-            Self::ShiftJisLossy => "fixed text cannot round-trip through Shift_JIS",
-        };
-        formatter.write_str(message)
+impl FixError {
+    /// Whether the failure represents a violated engine invariant.
+    #[must_use]
+    pub const fn is_internal(&self) -> bool {
+        match self {
+            Self::Check { source } => source.is_internal(),
+            Self::OverlappingEdits
+            | Self::InvalidEdit
+            | Self::EditOffset { .. }
+            | Self::NonConvergent
+            | Self::PassOverflow => true,
+            Self::Decode { .. } | Self::ShiftJisLossy => false,
+        }
     }
 }
-
-impl Error for FixError {}
 
 /// Fully validated result for one source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,7 +90,7 @@ pub struct SafeFixResult {
 /// final Shift_JIS round trip fails.
 pub fn apply_safe(raw: &[u8], orthography: Orthography) -> Result<SafeFixResult, FixError> {
     let without_bom = raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(raw);
-    let decoded = aozora::decode_auto(without_bom).map_err(|_| FixError::Decode)?;
+    let decoded = aozora::decode_auto(without_bom).map_err(|source| FixError::Decode { source })?;
     let mut current = decoded
         .strip_prefix('\u{FEFF}')
         .unwrap_or(&decoded)
@@ -73,7 +99,8 @@ pub fn apply_safe(raw: &[u8], orthography: Orthography) -> Result<SafeFixResult,
 
     loop {
         let report =
-            crate::pipeline::run_submission_with_orthography(current.as_bytes(), orthography);
+            crate::pipeline::run_submission_with_orthography(current.as_bytes(), orthography)
+                .map_err(|source| FixError::Check { source })?;
         let edits: Vec<TextEdit> = report
             .findings
             .iter()
@@ -94,7 +121,7 @@ pub fn apply_safe(raw: &[u8], orthography: Orthography) -> Result<SafeFixResult,
             return Err(FixError::NonConvergent);
         }
         current = apply_text_edits(&current, &edits)?;
-        passes += 1;
+        passes = passes.checked_add(1).ok_or(FixError::PassOverflow)?;
     }
 
     let normalized = normalize_submission_text(&current);
@@ -107,7 +134,8 @@ pub fn apply_safe(raw: &[u8], orthography: Orthography) -> Result<SafeFixResult,
     if decode_errors || round_trip != Cow::Borrowed(normalized.as_str()) {
         return Err(FixError::ShiftJisLossy);
     }
-    let verification = crate::pipeline::run_submission_with_orthography(&bytes, orthography);
+    let verification = crate::pipeline::run_submission_with_orthography(&bytes, orthography)
+        .map_err(|source| FixError::Check { source })?;
     if verification
         .findings
         .iter()
@@ -144,8 +172,10 @@ pub fn apply_text_edits(source: &str, edits: &[TextEdit]) -> Result<String, FixE
     let mut output = String::with_capacity(source.len());
     let mut cursor = 0usize;
     for edit in &ordered {
-        let start = usize::try_from(edit.span.start).map_err(|_| FixError::InvalidEdit)?;
-        let end = usize::try_from(edit.span.end).map_err(|_| FixError::InvalidEdit)?;
+        let start =
+            usize::try_from(edit.span.start).map_err(|source| FixError::EditOffset { source })?;
+        let end =
+            usize::try_from(edit.span.end).map_err(|source| FixError::EditOffset { source })?;
         let unchanged = source.get(cursor..start).ok_or(FixError::InvalidEdit)?;
         source.get(start..end).ok_or(FixError::InvalidEdit)?;
         output.push_str(unchanged);
@@ -157,7 +187,7 @@ pub fn apply_text_edits(source: &str, edits: &[TextEdit]) -> Result<String, FixE
 }
 
 fn normalize_submission_text(source: &str) -> String {
-    let mut lf = String::with_capacity(source.len() + 1);
+    let mut lf = String::with_capacity(source.len().saturating_add(1));
     let mut characters = source.chars().peekable();
     while let Some(character) = characters.next() {
         match character {
@@ -174,7 +204,7 @@ fn normalize_submission_text(source: &str) -> String {
     if !lf.is_empty() && !lf.ends_with('\n') {
         lf.push('\n');
     }
-    let mut crlf = String::with_capacity(lf.len() + lf.lines().count());
+    let mut crlf = String::with_capacity(lf.len().saturating_add(lf.lines().count()));
     for character in lf.chars() {
         if character == '\n' {
             crlf.push_str("\r\n");
@@ -214,18 +244,18 @@ mod tests {
                 replacement: "b".to_owned(),
             },
         ];
-        assert_eq!(
+        assert!(matches!(
             apply_text_edits("青空", &edits),
             Err(FixError::OverlappingEdits)
-        );
+        ));
     }
 
     #[test]
     fn unrepresentable_text_aborts_the_file() {
-        assert_eq!(
+        assert!(matches!(
             apply_safe("🍣".as_bytes(), Orthography::Mixed),
             Err(FixError::ShiftJisLossy)
-        );
+        ));
     }
 
     proptest! {

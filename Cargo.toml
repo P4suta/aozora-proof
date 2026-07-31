@@ -73,6 +73,21 @@ rc_buffer                       = "deny"
 verbose_file_reads              = "deny"
 str_to_string                   = "deny"
 mem_forget                      = "deny"
+arithmetic_side_effects         = "deny"
+cognitive_complexity            = "deny"
+let_underscore_must_use         = "deny"
+map_err_ignore                  = "deny"
+panic_in_result_fn              = "deny"
+unwrap_in_result                = "deny"
+try_err                         = "deny"
+unused_result_ok                = "deny"
+create_dir                      = "deny"
+error_impl_error                = "deny"
+mutex_atomic                    = "deny"
+mutex_integer                   = "deny"
+rc_mutex                        = "deny"
+string_add                      = "deny"
+assertions_on_result_states     = "deny"
 
 # Allowed: the fix would rename well-named types (Finding) or is outside our
 # control (transitive dependency versions).
@@ -98,6 +113,8 @@ tempfile              = "3.27"
 similar               = { version = "3.1", default-features = false, features = ["text"] }
 crossterm             = "0.29"
 ratatui               = { version = "0.30.2", default-features = false, features = ["crossterm_0_29"] }
+thiserror             = "2"
+syn                   = { version = "2", features = ["full", "visit"] }
 
 # Internal workspace crates.
 aozora-proof-core = { version = "0.2.0", path = "crates/aozora-proof-core" }

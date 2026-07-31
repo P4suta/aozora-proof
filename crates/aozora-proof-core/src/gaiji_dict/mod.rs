@@ -8,6 +8,7 @@ use aozora_proof_data::{
     MenKuTen, Suijun, char_at_men_ku_ten, gaiji_descriptions, gaiji_search, men_ku_ten,
 };
 
+use crate::CheckError;
 use crate::finding::{Finding, FixAlternative, FixOperation, Span};
 
 /// Everything known about a character that is relevant to 外字注記.
@@ -65,7 +66,11 @@ pub fn search(query: &str) -> Vec<(&'static str, char)> {
 /// findings of its own (so it can never double-report against the
 /// [`crate::moji`] 外字注記 warning), it only turns a bare "needs 外字注記"
 /// finding into an actionable review fix. Existing fixes are left as-is.
-pub fn annotate(findings: &mut [Finding]) {
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when validating a generated suggestion fails.
+pub fn annotate(findings: &mut [Finding]) -> Result<(), CheckError> {
     let covered: Vec<Span> = findings
         .iter()
         .flat_map(|finding| &finding.fixes)
@@ -95,7 +100,7 @@ pub fn annotate(findings: &mut [Finding]) {
             continue;
         }
         if let Some(chuki) = info.chuki
-            && suggestion_is_conformant(&chuki)
+            && suggestion_is_conformant(&chuki)?
         {
             f.fixes.push(FixAlternative::review_text(
                 f.span,
@@ -105,10 +110,11 @@ pub fn annotate(findings: &mut [Finding]) {
             ));
         }
     }
+    Ok(())
 }
 
-fn suggestion_is_conformant(text: &str) -> bool {
-    crate::moji::check(text).is_empty()
+fn suggestion_is_conformant(text: &str) -> Result<bool, CheckError> {
+    Ok(crate::moji::check(text)?.is_empty())
 }
 
 /// Build the 外字注記 form for a 第3/第4水準 cell:
@@ -120,7 +126,7 @@ fn chuki_form(m: MenKuTen, desc: Option<&str>) -> Option<String> {
         Suijun::Level4 => 4,
         _ => return None,
     };
-    let desc = desc.unwrap_or("");
+    let desc = desc?;
     Some(format!(
         "※［＃「{desc}」、第{level}水準{}-{}-{}］",
         m.men, m.ku, m.ten
@@ -171,6 +177,7 @@ mod tests {
             )
             .with_data(BTreeMap::new()),
         )
+        .expect("known gaiji rule")
     }
 
     #[test]
@@ -178,7 +185,7 @@ mod tests {
         // U+3094 (ゔ) is 第3水準 1-4-84 with the conformant description
         // 「濁点付き平仮名う」, so the offered 注記 is itself character-clean.
         let mut findings = vec![char_finding(Some('\u{3094}'))];
-        annotate(&mut findings);
+        annotate(&mut findings).expect("gaiji annotation");
         let fix = findings[0].fixes.first().expect("gaiji review fix");
         assert!(matches!(fix.operation, FixOperation::Text(_)));
         if let FixOperation::Text(edit) = &fix.operation {
@@ -190,7 +197,7 @@ mod tests {
 
     #[test]
     fn rejects_nonconformant_suggestion_text() {
-        assert!(!suggestion_is_conformant("※［＃「①」、外字］"));
+        assert!(!suggestion_is_conformant("※［＃「①」、外字］").expect("character check"));
     }
 
     #[test]
@@ -201,7 +208,7 @@ mod tests {
             char_finding(Some('A')),
             char_finding(None),
         ];
-        annotate(&mut findings);
+        annotate(&mut findings).expect("gaiji annotation");
         assert!(findings.iter().all(|finding| finding.fixes.is_empty()));
     }
 
@@ -223,7 +230,7 @@ mod tests {
         let mut bare = char_finding(Some('\u{3094}'));
         bare.span = span;
         let mut findings = vec![kyuji, bare];
-        annotate(&mut findings);
+        annotate(&mut findings).expect("gaiji annotation");
         assert!(
             findings[1].fixes.is_empty(),
             "the bare finding on a covered span must not get a gaiji suggestion"
@@ -240,7 +247,7 @@ mod tests {
             "kyuji".to_owned(),
         ));
         let mut findings = vec![f];
-        annotate(&mut findings);
+        annotate(&mut findings).expect("gaiji annotation");
         assert_eq!(findings[0].fixes.len(), 1);
         assert_eq!(findings[0].fixes[0].label, "kyuji");
     }

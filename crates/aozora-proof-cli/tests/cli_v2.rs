@@ -1,6 +1,10 @@
 //! Process-level contract tests for the 0.2 command surface.
 
-use std::error::Error;
+#![allow(
+    clippy::panic_in_result_fn,
+    reason = "process contract tests propagate setup failures and use assertions for contract failures"
+)]
+
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -8,7 +12,17 @@ use std::process::{Command, Output, Stdio};
 
 use tempfile::tempdir;
 
-fn run(arguments: &[&str], input: &[u8], config_home: &Path) -> Result<Output, Box<dyn Error>> {
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Utf8(#[from] std::string::FromUtf8Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
+
+fn run(arguments: &[&str], input: &[u8], config_home: &Path) -> Result<Output, TestError> {
     run_with_environment(arguments, input, config_home, &[])
 }
 
@@ -17,7 +31,7 @@ fn run_with_environment(
     input: &[u8],
     config_home: &Path,
     environment: &[(&str, &str)],
-) -> Result<Output, Box<dyn Error>> {
+) -> Result<Output, TestError> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_aozora-proof"));
     command
         .args(arguments)
@@ -47,7 +61,7 @@ fn run_with_environment(
 }
 
 #[test]
-fn help_and_version_expose_the_v2_commands() -> Result<(), Box<dyn Error>> {
+fn help_and_version_expose_the_v2_commands() -> Result<(), TestError> {
     let config = tempdir()?;
     let help = run(&["--help"], b"", config.path())?;
     let version = run(&["--version"], b"", config.path())?;
@@ -74,7 +88,7 @@ fn help_and_version_expose_the_v2_commands() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn piped_document_requires_orthography() -> Result<(), Box<dyn Error>> {
+fn piped_document_requires_orthography() -> Result<(), TestError> {
     let config = tempdir()?;
     let output = run(
         &["check", "--no-input", "-"],
@@ -89,7 +103,7 @@ fn piped_document_requires_orthography() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn decode_failure_is_exit_two_without_machine_output() -> Result<(), Box<dyn Error>> {
+fn decode_failure_is_exit_two_without_machine_output() -> Result<(), TestError> {
     let config = tempdir()?;
     let output = run(
         &[
@@ -112,7 +126,7 @@ fn decode_failure_is_exit_two_without_machine_output() -> Result<(), Box<dyn Err
 }
 
 #[test]
-fn json_is_schema_v2_and_language_invariant() -> Result<(), Box<dyn Error>> {
+fn json_is_schema_v2_and_language_invariant() -> Result<(), TestError> {
     let config = tempdir()?;
     let english = run(
         &[
@@ -161,7 +175,32 @@ fn json_is_schema_v2_and_language_invariant() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn sarif_declares_unicode_columns_encoding_authority_and_fix() -> Result<(), Box<dyn Error>> {
+fn successful_schema_v2_output_is_byte_stable() -> Result<(), TestError> {
+    let config = tempdir()?;
+    let output = run(
+        &[
+            "check",
+            "--orthography",
+            "mixed",
+            "--no-input",
+            "--format",
+            "json",
+            "-",
+        ],
+        b"",
+        config.path(),
+    )?;
+
+    assert!(output.status.success());
+    assert_eq!(
+        output.stdout,
+        include_bytes!("fixtures/schema-v2-empty.json")
+    );
+    Ok(())
+}
+
+#[test]
+fn sarif_declares_unicode_columns_encoding_authority_and_fix() -> Result<(), TestError> {
     let config = tempdir()?;
     let output = run(
         &[
@@ -217,7 +256,7 @@ fn sarif_declares_unicode_columns_encoding_authority_and_fix() -> Result<(), Box
 }
 
 #[test]
-fn stdin_fix_is_idempotent_shift_jis_output() -> Result<(), Box<dyn Error>> {
+fn stdin_fix_is_idempotent_shift_jis_output() -> Result<(), TestError> {
     let config = tempdir()?;
     let arguments = ["fix", "--orthography", "mixed", "--no-input", "-"];
     let first = run(&arguments, "ｶﾞ\n".as_bytes(), config.path())?;
@@ -232,7 +271,7 @@ fn stdin_fix_is_idempotent_shift_jis_output() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn directory_discovery_is_sorted_and_respects_ignore() -> Result<(), Box<dyn Error>> {
+fn directory_discovery_is_sorted_and_respects_ignore() -> Result<(), TestError> {
     let directory = tempdir()?;
     let config = tempdir()?;
     fs::write(directory.path().join("b.txt"), b"b\r\n")?;
@@ -299,7 +338,7 @@ fn directory_discovery_is_sorted_and_respects_ignore() -> Result<(), Box<dyn Err
 
 #[cfg(unix)]
 #[test]
-fn discovery_does_not_follow_symlinked_directories() -> Result<(), Box<dyn Error>> {
+fn discovery_does_not_follow_symlinked_directories() -> Result<(), TestError> {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir()?;
@@ -335,7 +374,7 @@ fn discovery_does_not_follow_symlinked_directories() -> Result<(), Box<dyn Error
 
 #[cfg(unix)]
 #[test]
-fn a_closed_output_pipe_is_success() -> Result<(), Box<dyn Error>> {
+fn a_closed_output_pipe_is_success() -> Result<(), TestError> {
     let directory = tempdir()?;
     let config = tempdir()?;
     let file = directory.path().join("many-findings.txt");
@@ -361,7 +400,7 @@ fn a_closed_output_pipe_is_success() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn unknown_configuration_key_has_a_suggestion() -> Result<(), Box<dyn Error>> {
+fn unknown_configuration_key_has_a_suggestion() -> Result<(), TestError> {
     let directory = tempdir()?;
     let config_home = tempdir()?;
     fs::write(
@@ -379,7 +418,7 @@ fn unknown_configuration_key_has_a_suggestion() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn configuration_precedence_is_flag_environment_project_user() -> Result<(), Box<dyn Error>> {
+fn configuration_precedence_is_flag_environment_project_user() -> Result<(), TestError> {
     let directory = tempdir()?;
     let config_home = tempdir()?;
     let user_directory = config_home.path().join("aozora-proof");
@@ -431,7 +470,7 @@ fn configuration_precedence_is_flag_environment_project_user() -> Result<(), Box
 }
 
 #[test]
-fn review_rejects_a_non_terminal() -> Result<(), Box<dyn Error>> {
+fn review_rejects_a_non_terminal() -> Result<(), TestError> {
     let directory = tempdir()?;
     let config = tempdir()?;
     let file = directory.path().join("work.txt");

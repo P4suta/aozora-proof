@@ -1,11 +1,8 @@
-use std::error::Error;
-use std::fmt;
-use std::fmt::Write as _;
 use std::io::{self, IsTerminal};
 
 use aozora_proof_core::{
-    DetectionClass, FixAlternative, FixOperation, SafeFixResult, TextEdit, apply_safe,
-    apply_text_edits, official_items,
+    CheckError, DetectionClass, FixAlternative, FixError, FixOperation, SafeFixResult, TextEdit,
+    apply_safe, apply_text_edits, official_items,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
@@ -22,27 +19,54 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use crate::document::Document;
 use crate::fix_command::{atomic_write, unified_diff};
 
-#[derive(Debug)]
-pub(crate) struct ReviewError {
-    message: String,
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ReviewError {
+    #[error("{message}")]
+    Message { message: String },
+    #[error("terminal I/O failed: {source}")]
+    Io {
+        #[source]
+        source: io::Error,
+    },
+    #[error("report coordinates are invalid: {source}")]
+    Check {
+        #[source]
+        source: CheckError,
+    },
+    #[error("{label}: reviewed fixes could not be prepared: {source}")]
+    Fix {
+        label: String,
+        #[source]
+        source: FixError,
+    },
+    #[error("{label}: reviewed output could not be written: {source}")]
+    Write {
+        label: String,
+        #[source]
+        source: crate::fix_command::FixCommandError,
+    },
 }
 
-impl fmt::Display for ReviewError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+impl ReviewError {
+    pub(crate) const fn is_internal(&self) -> bool {
+        match self {
+            Self::Check { .. } => true,
+            Self::Fix { source, .. } => source.is_internal(),
+            Self::Write { source, .. } => source.is_internal(),
+            Self::Message { .. } | Self::Io { .. } => false,
+        }
     }
 }
 
-impl Error for ReviewError {}
-
 #[derive(Debug, Clone)]
-struct Candidate {
+struct ReviewItem {
     file: usize,
-    finding: Option<usize>,
+    original: String,
     title: String,
     message: String,
     authority: String,
     fixes: Vec<FixAlternative>,
+    decision: Option<Decision>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,35 +91,50 @@ enum StateResult {
 
 #[derive(Debug)]
 struct ReviewState {
-    candidates: Vec<Candidate>,
-    decisions: Vec<Option<Decision>>,
+    items: Vec<ReviewItem>,
     cursor: usize,
     mode: Mode,
 }
 
 impl ReviewState {
-    fn new(documents: &[Document]) -> Self {
-        let mut candidates = Vec::new();
+    fn new(documents: &[Document]) -> Result<Self, ReviewError> {
+        let mut items = Vec::new();
         for (file, document) in documents.iter().enumerate() {
-            for (finding_index, finding) in document.report.findings.iter().enumerate() {
-                let detection = aozora_proof_core::explain(finding.code)
-                    .map_or(DetectionClass::Automatic, |rule| rule.detection);
-                if detection != DetectionClass::Review {
+            for finding in &document.report.findings {
+                if finding.detection != DetectionClass::Review {
                     continue;
                 }
+                let position = finding
+                    .position(&document.report.decoded)
+                    .map_err(|source| ReviewError::Check { source })?;
+                let line_index =
+                    position
+                        .line
+                        .checked_sub(1)
+                        .ok_or_else(|| ReviewError::Message {
+                            message: "a one-based source line was zero".to_owned(),
+                        })?;
+                let original = document
+                    .report
+                    .decoded
+                    .lines()
+                    .nth(line_index)
+                    .unwrap_or("")
+                    .to_owned();
                 let fixes = finding
                     .fixes
                     .iter()
                     .filter(|fix| fix.applicability == aozora_proof_core::FixApplicability::Review)
                     .cloned()
                     .collect();
-                candidates.push(Candidate {
+                items.push(ReviewItem {
                     file,
-                    finding: Some(finding_index),
+                    original,
                     title: finding.code.to_owned(),
                     message: finding.message.clone(),
                     authority: finding.authority_url.to_owned(),
                     fixes,
+                    decision: None,
                 });
             }
         }
@@ -103,22 +142,21 @@ impl ReviewState {
             .iter()
             .filter(|item| item.detection == DetectionClass::Manual)
         {
-            candidates.push(Candidate {
+            items.push(ReviewItem {
                 file: 0,
-                finding: None,
+                original: "Manual checklist item".to_owned(),
                 title: item.title.to_owned(),
                 message: "This requirement must be confirmed manually.".to_owned(),
                 authority: item.authority_url.to_owned(),
                 fixes: Vec::new(),
+                decision: None,
             });
         }
-        let decisions = vec![None; candidates.len()];
-        Self {
-            candidates,
-            decisions,
+        Ok(Self {
+            items,
             cursor: 0,
             mode: Mode::Review,
-        }
+        })
     }
 
     fn handle(&mut self, key: KeyEvent) -> StateResult {
@@ -157,32 +195,33 @@ impl ReviewState {
         match key.code {
             KeyCode::Char('y') => {
                 if self
-                    .candidates
+                    .items
                     .get(self.cursor)
                     .is_some_and(|candidate| !candidate.fixes.is_empty())
-                    && let Some(decision) = self.decisions.get_mut(self.cursor)
+                    && let Some(item) = self.items.get_mut(self.cursor)
                 {
-                    *decision = Some(Decision::Accepted(0));
+                    item.decision = Some(Decision::Accepted(0));
                 }
                 self.next();
             }
             KeyCode::Char('n') => {
-                if let Some(decision) = self.decisions.get_mut(self.cursor) {
-                    *decision = Some(Decision::Rejected);
+                if let Some(item) = self.items.get_mut(self.cursor) {
+                    item.decision = Some(Decision::Rejected);
                 }
                 self.next();
             }
             KeyCode::Char('a') => {
-                for (candidate, decision) in self.candidates.iter().zip(&mut self.decisions) {
-                    if !candidate.fixes.is_empty() {
-                        *decision = Some(Decision::Accepted(0));
+                for item in &mut self.items {
+                    if !item.fixes.is_empty() {
+                        item.decision = Some(Decision::Accepted(0));
                     }
                 }
             }
-            KeyCode::Char('d') => self
-                .decisions
-                .iter_mut()
-                .for_each(|decision| *decision = Some(Decision::Rejected)),
+            KeyCode::Char('d') => {
+                for item in &mut self.items {
+                    item.decision = Some(Decision::Rejected);
+                }
+            }
             KeyCode::Char('g') => self.cycle_alternative(),
             KeyCode::Char('j') | KeyCode::Down => self.next(),
             KeyCode::Char('k' | 'p') | KeyCode::Up => self.previous(),
@@ -195,46 +234,50 @@ impl ReviewState {
     }
 
     const fn next(&mut self) {
-        if !self.candidates.is_empty() {
-            self.cursor = (self.cursor + 1) % self.candidates.len();
+        if !self.items.is_empty() {
+            let next = self.cursor.saturating_add(1);
+            self.cursor = if next == self.items.len() { 0 } else { next };
         }
     }
 
     fn previous(&mut self) {
-        if !self.candidates.is_empty() {
+        if !self.items.is_empty() {
             self.cursor = self
                 .cursor
                 .checked_sub(1)
-                .unwrap_or(self.candidates.len() - 1);
+                .unwrap_or_else(|| self.items.len().saturating_sub(1));
         }
     }
 
     fn cycle_alternative(&mut self) {
-        let Some(candidate) = self.candidates.get(self.cursor) else {
+        let Some(item) = self.items.get(self.cursor) else {
             return;
         };
-        if candidate.fixes.is_empty() {
+        if item.fixes.is_empty() {
             return;
         }
-        let next = match self.decisions.get(self.cursor).copied().flatten() {
-            Some(Decision::Accepted(index)) => (index + 1) % candidate.fixes.len(),
+        let next = match item.decision {
+            Some(Decision::Accepted(index)) => {
+                let next = index.saturating_add(1);
+                if next == item.fixes.len() { 0 } else { next }
+            }
             Some(Decision::Rejected) | None => 0,
         };
-        if let Some(decision) = self.decisions.get_mut(self.cursor) {
-            *decision = Some(Decision::Accepted(next));
+        if let Some(item) = self.items.get_mut(self.cursor) {
+            item.decision = Some(Decision::Accepted(next));
         }
     }
 
     fn next_same_rule(&mut self) {
-        let Some(current) = self.candidates.get(self.cursor) else {
+        let Some(current) = self.items.get(self.cursor) else {
             return;
         };
         if let Some(index) = self
-            .candidates
+            .items
             .iter()
             .enumerate()
-            .skip(self.cursor + 1)
-            .find(|(_, candidate)| candidate.title == current.title)
+            .skip(self.cursor.saturating_add(1))
+            .find(|(_, item)| item.title == current.title)
             .map(|(index, _)| index)
         {
             self.cursor = index;
@@ -242,12 +285,11 @@ impl ReviewState {
     }
 
     fn selected_edits(&self, file: usize) -> Vec<TextEdit> {
-        self.candidates
+        self.items
             .iter()
-            .zip(&self.decisions)
-            .filter(|(candidate, _)| candidate.file == file)
-            .filter_map(|(candidate, decision)| match decision {
-                Some(Decision::Accepted(index)) => candidate.fixes.get(*index),
+            .filter(|item| item.file == file)
+            .filter_map(|item| match item.decision {
+                Some(Decision::Accepted(index)) => item.fixes.get(index),
                 Some(Decision::Rejected) | None => None,
             })
             .filter_map(|fix| match &fix.operation {
@@ -271,13 +313,13 @@ pub(crate) fn run(documents: &[Document]) -> Result<usize, ReviewError> {
 
     let session = TerminalSession::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend).map_err(|source| io_error(&source))?;
-    let mut state = ReviewState::new(documents);
+    let mut terminal = Terminal::new(backend).map_err(io_error)?;
+    let mut state = ReviewState::new(documents)?;
     let action = loop {
         terminal
             .draw(|frame| draw(frame, &state, documents))
-            .map_err(|source| io_error(&source))?;
-        let event = event::read().map_err(|source| io_error(&source))?;
+            .map_err(io_error)?;
+        let event = event::read().map_err(io_error)?;
         if let Event::Key(key) = event {
             match state.handle(key) {
                 StateResult::Continue => {}
@@ -323,38 +365,15 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &ReviewState, documents: &[Docume
     let [original, reason, diff, progress] = chunks.as_ref() else {
         return;
     };
-    draw_context(frame, state, documents, [*original, *reason]);
+    draw_context(frame, state, [*original, *reason]);
     draw_diff(frame, state, documents, *diff);
     draw_progress(frame, state, *progress);
 }
 
-fn draw_context(
-    frame: &mut ratatui::Frame<'_>,
-    state: &ReviewState,
-    documents: &[Document],
-    areas: [Rect; 2],
-) {
+fn draw_context(frame: &mut ratatui::Frame<'_>, state: &ReviewState, areas: [Rect; 2]) {
     let [original_area, reason_area] = areas;
-    let candidate = state.candidates.get(state.cursor);
-    let source = candidate
-        .and_then(|item| documents.get(item.file))
-        .map_or("", |document| document.report.decoded.as_str());
-    let original = candidate
-        .and_then(|item| {
-            item.finding
-                .and_then(|index| documents.get(item.file)?.report.findings.get(index))
-        })
-        .map_or_else(
-            || "Manual checklist item".to_owned(),
-            |finding| {
-                let position = finding.position(source);
-                source
-                    .lines()
-                    .nth(position.line.saturating_sub(1))
-                    .unwrap_or("")
-                    .to_owned()
-            },
-        );
+    let item = state.items.get(state.cursor);
+    let original = item.map_or("Manual checklist item", |review_item| &review_item.original);
     frame.render_widget(
         Paragraph::new(original)
             .block(Block::default().title("Original").borders(Borders::ALL))
@@ -362,7 +381,7 @@ fn draw_context(
         original_area,
     );
 
-    let reason = candidate.map_or_else(
+    let reason = item.map_or_else(
         || "No review candidates.".to_owned(),
         |item| format!("{}\n{}\n{}", item.title, item.message, item.authority),
     );
@@ -384,34 +403,30 @@ fn draw_diff(
     documents: &[Document],
     area: Rect,
 ) {
-    let candidate = state.candidates.get(state.cursor);
+    let item = state.items.get(state.cursor);
     let diff = if state.mode == Mode::Confirm {
         selected_diff(state, documents)
     } else {
-        candidate
-            .and_then(|item| {
-                let selected = state
-                    .decisions
-                    .get(state.cursor)
-                    .copied()
-                    .flatten()
-                    .and_then(|decision| match decision {
-                        Decision::Accepted(index) => Some(index),
-                        Decision::Rejected => None,
-                    })
-                    .unwrap_or(0);
-                item.fixes.get(selected)
-            })
-            .map_or_else(
-                || "No automatic replacement; confirm manually.".to_owned(),
-                |fix| match &fix.operation {
-                    FixOperation::Text(edit) => format!(
-                        "- decoded bytes {}..{}\n+ {}",
-                        edit.span.start, edit.span.end, edit.replacement
-                    ),
-                    operation => format!("+ {}", operation.as_wire_str()),
-                },
-            )
+        item.and_then(|item| {
+            let selected = item
+                .decision
+                .and_then(|decision| match decision {
+                    Decision::Accepted(index) => Some(index),
+                    Decision::Rejected => None,
+                })
+                .unwrap_or(0);
+            item.fixes.get(selected)
+        })
+        .map_or_else(
+            || "No automatic replacement; confirm manually.".to_owned(),
+            |fix| match &fix.operation {
+                FixOperation::Text(edit) => format!(
+                    "- decoded bytes {}..{}\n+ {}",
+                    edit.span.start, edit.span.end, edit.replacement
+                ),
+                operation => format!("+ {}", operation.as_wire_str()),
+            },
+        )
     };
     let title = if state.mode == Mode::Confirm {
         "Final diff — y write / n back / q abort"
@@ -428,21 +443,21 @@ fn draw_diff(
 
 fn draw_progress(frame: &mut ratatui::Frame<'_>, state: &ReviewState, area: Rect) {
     let accepted = state
-        .decisions
+        .items
         .iter()
-        .filter(|decision| matches!(decision, Some(Decision::Accepted(_))))
+        .filter(|item| matches!(item.decision, Some(Decision::Accepted(_))))
         .count();
     let rejected = state
-        .decisions
+        .items
         .iter()
-        .filter(|decision| matches!(decision, Some(Decision::Rejected)))
+        .filter(|item| matches!(item.decision, Some(Decision::Rejected)))
         .count();
     let progress = Line::from(vec![
         TextSpan::styled(
             format!(
                 " {}/{}  accepted {accepted}  rejected {rejected} ",
                 state.cursor.saturating_add(1),
-                state.candidates.len()
+                state.items.len()
             ),
             Style::default()
                 .fg(Color::Cyan)
@@ -470,14 +485,16 @@ fn selected_diff(state: &ReviewState, documents: &[Document]) -> String {
                     &document.report.decoded,
                     &fixed.decoded,
                 ));
-                let _ = writeln!(
-                    output,
-                    "# {}: output encoding Shift_JIS; line endings CRLF",
-                    document.label
-                );
+                output.push_str("# ");
+                output.push_str(&document.label);
+                output.push_str(": output encoding Shift_JIS; line endings CRLF\n");
             }
             Err(source) => {
-                let _ = writeln!(output, "# {}: {source}", document.label);
+                output.push_str("# ");
+                output.push_str(&document.label);
+                output.push_str(": ");
+                output.push_str(&source.to_string());
+                output.push('\n');
             }
         }
     }
@@ -503,27 +520,34 @@ fn commit(documents: &[Document], state: &ReviewState) -> Result<usize, ReviewEr
         prepared.push((path, document.raw.as_slice(), fixed.bytes));
     }
     for (path, original, bytes) in &prepared {
-        atomic_write(path, original, bytes)
-            .map_err(|source| message(format!("{}: {source}", path.display())))?;
+        atomic_write(path, original, bytes).map_err(|source| ReviewError::Write {
+            label: path.display().to_string(),
+            source,
+        })?;
     }
     Ok(prepared.len())
 }
 
 fn prepare(document: &Document, edits: &[TextEdit]) -> Result<SafeFixResult, ReviewError> {
-    let staged = apply_text_edits(&document.report.decoded, edits)
-        .map_err(|source| message(format!("{}: {source}", document.label)))?;
-    apply_safe(staged.as_bytes(), document.report.orthography)
-        .map_err(|source| message(format!("{}: {source}", document.label)))
+    let staged =
+        apply_text_edits(&document.report.decoded, edits).map_err(|source| ReviewError::Fix {
+            label: document.label.clone(),
+            source,
+        })?;
+    apply_safe(staged.as_bytes(), document.report.orthography).map_err(|source| ReviewError::Fix {
+        label: document.label.clone(),
+        source,
+    })
 }
 
 struct TerminalSession;
 
 impl TerminalSession {
     fn enter() -> Result<Self, ReviewError> {
-        enable_raw_mode().map_err(|source| io_error(&source))?;
+        enable_raw_mode().map_err(io_error)?;
         if let Err(source) = execute!(io::stdout(), EnterAlternateScreen) {
             drop(disable_raw_mode());
-            return Err(io_error(&source));
+            return Err(io_error(source));
         }
         Ok(Self)
     }
@@ -536,20 +560,18 @@ impl Drop for TerminalSession {
     }
 }
 
-fn io_error(source: &io::Error) -> ReviewError {
-    message(source.to_string())
+const fn io_error(source: io::Error) -> ReviewError {
+    ReviewError::Io { source }
 }
 
 fn message(value: impl Into<String>) -> ReviewError {
-    ReviewError {
+    ReviewError::Message {
         message: value.into(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
     use aozora_proof_core::{Orthography, run_submission_with_orthography};
     use ratatui::backend::TestBackend;
 
@@ -558,15 +580,15 @@ mod tests {
     #[test]
     fn key_transitions_never_commit_before_final_confirmation() {
         let mut state = ReviewState {
-            candidates: vec![Candidate {
+            items: vec![ReviewItem {
                 file: 0,
-                finding: None,
+                original: "manual".to_owned(),
                 title: "manual".to_owned(),
                 message: String::new(),
                 authority: String::new(),
                 fixes: Vec::new(),
+                decision: None,
             }],
-            decisions: vec![None],
             cursor: 0,
             mode: Mode::Review,
         };
@@ -588,8 +610,7 @@ mod tests {
     #[test]
     fn escape_discards_staged_state() {
         let mut state = ReviewState {
-            candidates: Vec::new(),
-            decisions: Vec::new(),
+            items: Vec::new(),
             cursor: 0,
             mode: Mode::Review,
         };
@@ -602,8 +623,7 @@ mod tests {
     #[test]
     fn control_c_discards_staged_state() {
         let mut state = ReviewState {
-            candidates: Vec::new(),
-            decisions: Vec::new(),
+            items: Vec::new(),
             cursor: 0,
             mode: Mode::Review,
         };
@@ -623,26 +643,32 @@ mod tests {
                 "置換".to_owned(),
             )
         };
-        let candidate = |title: &str| Candidate {
+        let item = |title: &str| ReviewItem {
             file: 0,
-            finding: None,
+            original: String::new(),
             title: title.to_owned(),
             message: String::new(),
             authority: String::new(),
             fixes: vec![replacement("one"), replacement("two")],
+            decision: None,
         };
         let mut state = ReviewState {
-            candidates: vec![candidate("same"), candidate("same"), candidate("other")],
-            decisions: vec![None; 3],
+            items: vec![item("same"), item("same"), item("other")],
             cursor: 0,
             mode: Mode::Review,
         };
         let key = |value| KeyEvent::new(KeyCode::Char(value), KeyModifiers::NONE);
 
         assert_eq!(state.handle(key('g')), StateResult::Continue);
-        assert_eq!(state.decisions.first(), Some(&Some(Decision::Accepted(0))));
+        assert_eq!(
+            state.items.first().and_then(|item| item.decision),
+            Some(Decision::Accepted(0))
+        );
         assert_eq!(state.handle(key('g')), StateResult::Continue);
-        assert_eq!(state.decisions.first(), Some(&Some(Decision::Accepted(1))));
+        assert_eq!(
+            state.items.first().and_then(|item| item.decision),
+            Some(Decision::Accepted(1))
+        );
 
         state.handle(key('/'));
         assert_eq!(state.cursor, 1);
@@ -656,16 +682,16 @@ mod tests {
         state.handle(key('a'));
         assert!(
             state
-                .decisions
+                .items
                 .iter()
-                .all(|decision| matches!(decision, Some(Decision::Accepted(0))))
+                .all(|item| matches!(item.decision, Some(Decision::Accepted(0))))
         );
         state.handle(key('d'));
         assert!(
             state
-                .decisions
+                .items
                 .iter()
-                .all(|decision| *decision == Some(Decision::Rejected))
+                .all(|item| item.decision == Some(Decision::Rejected))
         );
 
         state.handle(key('?'));
@@ -676,19 +702,22 @@ mod tests {
     }
 
     #[test]
-    fn test_backend_renders_all_review_regions() -> Result<(), Box<dyn Error>> {
+    fn test_backend_renders_all_review_regions() {
         let raw = "一ヶ月\n".as_bytes().to_vec();
         let documents = vec![Document {
             label: "work.txt".to_owned(),
             path: None,
-            report: run_submission_with_orthography(&raw, Orthography::Mixed),
+            report: run_submission_with_orthography(&raw, Orthography::Mixed)
+                .expect("valid report"),
             raw,
         }];
-        let state = ReviewState::new(&documents);
+        let state = ReviewState::new(&documents).expect("valid review state");
         let backend = TestBackend::new(100, 30);
-        let mut terminal = Terminal::new(backend)?;
+        let mut terminal = Terminal::new(backend).expect("test terminal");
 
-        terminal.draw(|frame| draw(frame, &state, &documents))?;
+        terminal
+            .draw(|frame| draw(frame, &state, &documents))
+            .expect("draw review state");
 
         let rendered: String = terminal
             .backend()
@@ -701,6 +730,5 @@ mod tests {
         assert!(rendered.contains("Reason / authority"));
         assert!(rendered.contains("Candidate diff"));
         assert!(rendered.contains("Ctrl-S"));
-        Ok(())
     }
 }

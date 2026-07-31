@@ -35,6 +35,7 @@ dependencies = [
  "encoding_rs",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -42,6 +43,7 @@ name = "aozora-proof-data"
 version = "0.2.0"
 dependencies = [
  "encoding_rs",
+ "thiserror",
 ]
 
 [[package]]

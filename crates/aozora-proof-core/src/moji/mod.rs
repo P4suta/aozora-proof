@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use aozora_proof_data::{Suijun, is_platform_dependent, jis_level};
 
+use crate::CheckError;
 use crate::finding::{Finding, FindingDetails, FixAlternative, Origin, Span};
 use crate::rules::codes;
 
@@ -93,23 +94,29 @@ fn classify(character: char) -> Option<CharacterIssue> {
 }
 
 /// Run character and canonical-token checks over decoded text.
-#[must_use]
-pub fn check(text: &str) -> Vec<Finding> {
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when catalog lookup or checked span arithmetic
+/// fails.
+pub fn check(text: &str) -> Result<Vec<Finding>, CheckError> {
     let mut findings = Vec::new();
     let mut characters = text.char_indices().peekable();
     while let Some((offset, character)) = characters.next() {
-        if let Some(finding) = halfwidth_finding(offset, character, &mut characters) {
+        if let Some(finding) = halfwidth_finding(offset, character, &mut characters)? {
             findings.push(finding);
             continue;
         }
 
-        if let Some(finding) = ruby_marker_finding(text, offset, character) {
+        if let Some(finding) = ruby_marker_finding(text, offset, character)? {
             findings.push(finding);
             continue;
         }
 
-        let rest = text.get(offset..).unwrap_or_default();
-        if let Some(finding) = iteration_finding(rest, offset) {
+        let rest = text.get(offset..).ok_or(CheckError::DetectorInvariant {
+            operation: "reading a character-indexed source suffix",
+        })?;
+        if let Some(finding) = iteration_finding(rest, offset)? {
             characters.next();
             characters.next();
             findings.push(finding);
@@ -117,29 +124,42 @@ pub fn check(text: &str) -> Vec<Finding> {
         }
 
         if let Some(issue) = classify(character) {
-            findings.push(issue_finding(offset, character, issue));
+            findings.push(issue_finding(offset, character, issue)?);
         }
     }
-    findings
+    Ok(findings)
 }
 
 fn halfwidth_finding(
     offset: usize,
     character: char,
     characters: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-) -> Option<Finding> {
-    let mut replacement = halfwidth_equivalent(character)?;
-    let mut end = offset + character.len_utf8();
+) -> Result<Option<Finding>, CheckError> {
+    let Some(mut replacement) = halfwidth_equivalent(character) else {
+        return Ok(None);
+    };
+    let mut end =
+        offset
+            .checked_add(character.len_utf8())
+            .ok_or(CheckError::CoordinateOverflow {
+                operation: "computing a half-width kana span",
+            })?;
     if let Some(&(_, mark)) = characters.peek()
         && matches!(mark, '\u{FF9E}' | '\u{FF9F}')
         && let Some(composed) = compose_kana(replacement, mark)
     {
-        let (_, consumed) = characters.next().unwrap_or((offset, mark));
-        end += consumed.len_utf8();
+        let (_, consumed) = characters.next().ok_or(CheckError::DetectorInvariant {
+            operation: "consuming a peeked half-width kana mark",
+        })?;
+        end = end
+            .checked_add(consumed.len_utf8())
+            .ok_or(CheckError::CoordinateOverflow {
+                operation: "extending a half-width kana span",
+            })?;
         replacement = composed;
     }
-    let character_span = span(offset, end);
-    Some(Finding::from_rule(
+    let character_span = span(offset, end)?;
+    Finding::from_rule(
         codes::HALFWIDTH_KANA,
         Origin::Character,
         character_span,
@@ -155,16 +175,31 @@ fn halfwidth_finding(
             format!("Replace {character:?} with {replacement:?}"),
             format!("「{character}」を「{replacement}」へ変換"),
         )]),
-    ))
+    )
+    .map(Some)
 }
 
-fn ruby_marker_finding(text: &str, offset: usize, character: char) -> Option<Finding> {
-    if character != '|' || !ruby_boundary_is_unambiguous(text.get(offset + 1..).unwrap_or_default())
-    {
-        return None;
+fn ruby_marker_finding(
+    text: &str,
+    offset: usize,
+    character: char,
+) -> Result<Option<Finding>, CheckError> {
+    if character != '|' {
+        return Ok(None);
     }
-    let marker_span = span(offset, offset + 1);
-    Some(Finding::from_rule(
+    let end = offset
+        .checked_add(character.len_utf8())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing a ruby marker span",
+        })?;
+    let rest = text.get(end..).ok_or(CheckError::DetectorInvariant {
+        operation: "reading the suffix after a ruby marker",
+    })?;
+    if !ruby_boundary_is_unambiguous(rest) {
+        return Ok(None);
+    }
+    let marker_span = span(offset, end)?;
+    Finding::from_rule(
         codes::ASCII_RUBY_MARKER,
         Origin::Notation,
         marker_span,
@@ -179,15 +214,24 @@ fn ruby_marker_finding(text: &str, offset: usize, character: char) -> Option<Fin
             "Replace the ASCII boundary marker".to_owned(),
             "区切り記号を全角へ変換".to_owned(),
         )]),
-    ))
+    )
+    .map(Some)
 }
 
-fn iteration_finding(rest: &str, offset: usize) -> Option<Finding> {
-    let bad = ["／〃＼", "／“＼", "／”＼"]
+fn iteration_finding(rest: &str, offset: usize) -> Result<Option<Finding>, CheckError> {
+    let Some(bad) = ["／〃＼", "／“＼", "／”＼"]
         .into_iter()
-        .find(|candidate| rest.starts_with(candidate))?;
-    let iteration_span = span(offset, offset + bad.len());
-    Some(Finding::from_rule(
+        .find(|candidate| rest.starts_with(candidate))
+    else {
+        return Ok(None);
+    };
+    let end = offset
+        .checked_add(bad.len())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing an iteration-mark span",
+        })?;
+    let iteration_span = span(offset, end)?;
+    Finding::from_rule(
         codes::ITERATION_MARK,
         Origin::Notation,
         iteration_span,
@@ -201,11 +245,21 @@ fn iteration_finding(rest: &str, offset: usize) -> Option<Finding> {
             "Use the canonical double-prime form".to_owned(),
             "規定の「／″＼」へ変換".to_owned(),
         )]),
-    ))
+    )
+    .map(Some)
 }
 
-fn issue_finding(offset: usize, character: char, issue: CharacterIssue) -> Finding {
-    let issue_span = span(offset, offset + character.len_utf8());
+fn issue_finding(
+    offset: usize,
+    character: char,
+    issue: CharacterIssue,
+) -> Result<Finding, CheckError> {
+    let end = offset
+        .checked_add(character.len_utf8())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing a character-issue span",
+        })?;
+    let issue_span = span(offset, end)?;
     let (message, message_ja) = issue.messages(character);
     Finding::from_rule(
         issue.code(),
@@ -238,11 +292,8 @@ fn review_fixes(issue: CharacterIssue, issue_span: Span) -> Vec<FixAlternative> 
     }
 }
 
-fn span(start: usize, end: usize) -> Span {
-    Span {
-        start: u32::try_from(start).unwrap_or(u32::MAX),
-        end: u32::try_from(end).unwrap_or(u32::MAX),
-    }
+fn span(start: usize, end: usize) -> Result<Span, CheckError> {
+    Span::try_from_usize(start, end)
 }
 
 fn character_data(character: char) -> BTreeMap<String, String> {
@@ -307,7 +358,7 @@ mod tests {
 
     #[test]
     fn halfwidth_pairs_have_one_safe_composed_fix() {
-        let findings = check("ｶﾞ");
+        let findings = check("ｶﾞ").expect("character check");
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].code, codes::HALFWIDTH_KANA);
         let fix = findings[0].fixes.first().expect("safe fix");
@@ -321,7 +372,7 @@ mod tests {
 
     #[test]
     fn safe_notation_spellings_are_detected() {
-        let findings = check("|青空《あおぞら》／〃＼");
+        let findings = check("|青空《あおぞら》／〃＼").expect("character check");
         assert!(
             findings
                 .iter()
@@ -336,6 +387,10 @@ mod tests {
 
     #[test]
     fn clean_character_text_has_no_findings() {
-        assert!(check("青空文庫のふつうの文章。亜").is_empty());
+        assert!(
+            check("青空文庫のふつうの文章。亜")
+                .expect("character check")
+                .is_empty()
+        );
     }
 }

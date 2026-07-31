@@ -1,9 +1,15 @@
 //! Behavioral cases documented by the independent Checkerkun implementation.
 
+#![allow(
+    clippy::expect_used,
+    reason = "test fixtures are required to produce complete reports"
+)]
+
 use aozora_proof_core::run_all;
 
 fn codes(text: &str) -> Vec<&'static str> {
     run_all(text.as_bytes())
+        .expect("oracle input checks")
         .findings
         .into_iter()
         .map(|finding| finding.code)

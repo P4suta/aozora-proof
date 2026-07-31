@@ -37,6 +37,8 @@ jobs:
           components: rustfmt, clippy
       - name: fmt
         run: cargo fmt --all -- --check
+      - name: Rust policy
+        run: cargo run --locked -p xtask -- lint rust-policy
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: doc

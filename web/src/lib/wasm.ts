@@ -29,6 +29,14 @@ export type Finding = {
 };
 
 export type GaijiMatch = { description: string; char: string; codepoint: string };
+export type CheckState =
+	| { status: 'loading' }
+	| { status: 'ready'; findings: Finding[] }
+	| { status: 'error'; message: string };
+export type SearchState =
+	| { status: 'loading' }
+	| { status: 'ready'; matches: GaijiMatch[] }
+	| { status: 'error'; message: string };
 
 let readyPromise: Promise<void> | undefined;
 let api: WasmModule | undefined;
@@ -40,33 +48,31 @@ export function ensureReady(): Promise<void> {
 			const mod = (await import('$lib/pkg/aozora_proof_wasm.js')) as unknown as WasmModule;
 			await mod.default();
 			api = mod;
-			try {
-				titles = JSON.parse(mod.ruleTitlesJson());
-			} catch {
-				titles = {};
-			}
+			titles = JSON.parse(mod.ruleTitlesJson());
 		})();
 	}
 	return readyPromise;
 }
 
-// Findings for `text`, or [] before the wasm module is ready.
-export function check(text: string): Finding[] {
-	if (!api) return [];
+export function check(text: string): CheckState {
+	if (!api) return { status: 'loading' };
 	try {
-		return JSON.parse(api.checkJson(text)).files?.[0]?.findings ?? [];
-	} catch {
-		return [];
+		const findings = JSON.parse(api.checkJson(text)).files?.[0]?.findings;
+		if (!Array.isArray(findings)) throw new Error('校正結果の形式が不正です。');
+		return { status: 'ready', findings };
+	} catch (error) {
+		return { status: 'error', message: errorMessage(error) };
 	}
 }
 
-// 外字注記辞書 matches for `query`, or [] before the wasm module is ready.
-export function searchGaiji(query: string): GaijiMatch[] {
-	if (!api) return [];
+export function searchGaiji(query: string): SearchState {
+	if (!api) return { status: 'loading' };
 	try {
-		return JSON.parse(api.gaijiSearchJson(query)).matches ?? [];
-	} catch {
-		return [];
+		const matches = JSON.parse(api.gaijiSearchJson(query)).matches;
+		if (!Array.isArray(matches)) throw new Error('外字検索結果の形式が不正です。');
+		return { status: 'ready', matches };
+	} catch (error) {
+		return { status: 'error', message: errorMessage(error) };
 	}
 }
 
@@ -74,4 +80,8 @@ export function searchGaiji(query: string): GaijiMatch[] {
 // has no documented title (e.g. notation findings).
 export function ruleTitle(code: string): string | undefined {
 	return titles[code];
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }

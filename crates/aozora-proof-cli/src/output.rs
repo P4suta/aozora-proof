@@ -1,16 +1,38 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::fmt;
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal};
 
 use anstyle::{AnsiColor, Style};
 use aozora_proof_core::{
-    DetectionClass, Finding, FixOperation, ReportFile, Severity, all_rules, official_items,
-    serialize_reports,
+    CheckError, DetectionClass, Finding, FixOperation, Origin, ReportFile, Severity, all_rules,
+    official_items, serialize_reports,
 };
 
 use crate::cli::{ColorChoice, Format, LanguageArg};
 use crate::document::Document;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RenderError {
+    #[error("machine report serialization failed: {source}")]
+    Serialize {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("report coordinates are invalid: {source}")]
+    Check {
+        #[source]
+        source: CheckError,
+    },
+    #[error("in-memory text rendering failed: {source}")]
+    Format {
+        #[source]
+        source: fmt::Error,
+    },
+    #[error("automatic output format was not resolved")]
+    UnresolvedFormat,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Painter {
@@ -53,17 +75,17 @@ pub(crate) fn render(
     format: Format,
     language: LanguageArg,
     painter: Painter,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, RenderError> {
     match resolve_format(format) {
-        Format::Human => human(documents, language, painter).into_bytes(),
-        Format::Json => json(documents).into_bytes(),
-        Format::Short => short(documents).into_bytes(),
-        Format::Sarif => sarif(documents).into_bytes(),
-        Format::Auto => Vec::new(),
+        Format::Human => human(documents, language, painter).map(String::into_bytes),
+        Format::Json => json(documents).map(String::into_bytes),
+        Format::Short => short(documents).map(String::into_bytes),
+        Format::Sarif => sarif(documents).map(String::into_bytes),
+        Format::Auto => Err(RenderError::UnresolvedFormat),
     }
 }
 
-fn json(documents: &[Document]) -> String {
+fn json(documents: &[Document]) -> Result<String, RenderError> {
     let files: Vec<ReportFile<'_>> = documents
         .iter()
         .map(|document| ReportFile {
@@ -71,34 +93,41 @@ fn json(documents: &[Document]) -> String {
             report: &document.report,
         })
         .collect();
-    let mut output = serialize_reports(&files);
+    let mut output =
+        serialize_reports(&files).map_err(|source| RenderError::Serialize { source })?;
     output.push('\n');
-    output
+    Ok(output)
 }
 
-fn human(documents: &[Document], language: LanguageArg, painter: Painter) -> String {
+fn human(
+    documents: &[Document],
+    language: LanguageArg,
+    painter: Painter,
+) -> Result<String, RenderError> {
     let japanese = language == LanguageArg::Ja;
     let mut output = String::new();
     let mut total = 0usize;
     for document in documents {
         let heading = painter.paint(Style::new().bold(), &document.label);
-        let _ = writeln!(output, "{heading}:");
+        writeln!(output, "{heading}:").map_err(|source| RenderError::Format { source })?;
         if document.report.findings.is_empty() {
             let clean = if japanese {
                 "  自動検査の指摘はありません。"
             } else {
                 "  No automated findings."
             };
-            let _ = writeln!(output, "{clean}");
+            writeln!(output, "{clean}").map_err(|source| RenderError::Format { source })?;
         }
         for finding in &document.report.findings {
-            let position = finding.position(&document.report.decoded);
+            let position = finding
+                .position(&document.report.decoded)
+                .map_err(|source| RenderError::Check { source })?;
             let severity = painter.paint(
                 severity_style(finding.severity),
                 finding.severity.as_wire_str(),
             );
             let code = painter.paint(Style::new().dimmed(), finding.code);
-            let _ = writeln!(
+            writeln!(
                 output,
                 "  {}:{}  {:7}  {}  {}",
                 position.line,
@@ -106,49 +135,53 @@ fn human(documents: &[Document], language: LanguageArg, painter: Painter) -> Str
                 severity,
                 code,
                 finding.localized_message(japanese)
-            );
+            )
+            .map_err(|source| RenderError::Format { source })?;
             for fix in &finding.fixes {
                 let label = if japanese { &fix.label_ja } else { &fix.label };
-                let _ = writeln!(
+                writeln!(
                     output,
                     "           ↳ {}: {label}",
                     fix.applicability.as_wire_str()
-                );
+                )
+                .map_err(|source| RenderError::Format { source })?;
             }
-            total += 1;
+            total = total.saturating_add(1);
         }
-        let _ = writeln!(output);
+        writeln!(output).map_err(|source| RenderError::Format { source })?;
     }
 
-    let manual: Vec<_> = official_items()
-        .iter()
-        .filter(|item| item.detection == DetectionClass::Manual)
-        .collect();
     let checklist = if japanese {
         "人手確認（自動確認済みではありません）"
     } else {
         "Manual checks (not automatically verified)"
     };
-    let _ = writeln!(output, "{checklist}:");
-    for item in manual {
+    writeln!(output, "{checklist}:").map_err(|source| RenderError::Format { source })?;
+    for item in official_items()
+        .iter()
+        .filter(|item| item.detection == DetectionClass::Manual)
+    {
         let title = if japanese { item.title_ja } else { item.title };
-        let _ = writeln!(output, "  - {title}  {}", item.authority_url);
+        writeln!(output, "  - {title}  {}", item.authority_url)
+            .map_err(|source| RenderError::Format { source })?;
     }
     let summary = if japanese {
         format!("{total} 件の指摘。")
     } else {
         format!("{total} finding(s).")
     };
-    let _ = writeln!(output, "{summary}");
-    output
+    writeln!(output, "{summary}").map_err(|source| RenderError::Format { source })?;
+    Ok(output)
 }
 
-fn short(documents: &[Document]) -> String {
+fn short(documents: &[Document]) -> Result<String, RenderError> {
     let mut output = String::new();
     for document in documents {
         for finding in &document.report.findings {
-            let position = finding.position(&document.report.decoded);
-            let _ = writeln!(
+            let position = finding
+                .position(&document.report.decoded)
+                .map_err(|source| RenderError::Check { source })?;
+            writeln!(
                 output,
                 "{}:{}:{}: {} {} {}",
                 document.label,
@@ -157,13 +190,14 @@ fn short(documents: &[Document]) -> String {
                 finding.severity.as_wire_str(),
                 finding.code,
                 finding.message
-            );
+            )
+            .map_err(|source| RenderError::Format { source })?;
         }
     }
-    output
+    Ok(output)
 }
 
-fn sarif(documents: &[Document]) -> String {
+fn sarif(documents: &[Document]) -> Result<String, RenderError> {
     let mut rules = BTreeMap::new();
     let mut results = Vec::new();
     let mut artifacts = Vec::new();
@@ -173,10 +207,10 @@ fn sarif(documents: &[Document]) -> String {
             "encoding": document.report.encoding.as_wire_str(),
         }));
         for finding in &document.report.findings {
-            rules
-                .entry(finding.code)
-                .or_insert_with(|| rule_json(finding));
-            results.push(result_json(document, finding));
+            if !rules.contains_key(finding.code) {
+                rules.insert(finding.code, rule_json(finding)?);
+            }
+            results.push(result_json(document, finding)?);
         }
     }
     let document = serde_json::json!({
@@ -196,64 +230,67 @@ fn sarif(documents: &[Document]) -> String {
             "results": results,
         }]
     });
-    let mut output = serde_json::to_string(&document).unwrap_or_else(|_| "{}".to_owned());
+    let mut output =
+        serde_json::to_string(&document).map_err(|source| RenderError::Serialize { source })?;
     output.push('\n');
-    output
+    Ok(output)
 }
 
-fn rule_json(finding: &Finding) -> serde_json::Value {
-    let title = all_rules()
-        .iter()
-        .find(|rule| rule.code == finding.code)
-        .map_or_else(|| finding.kind(), |rule| rule.title);
-    serde_json::json!({
+fn rule_json(finding: &Finding) -> Result<serde_json::Value, RenderError> {
+    let title = match all_rules().iter().find(|rule| rule.code == finding.code) {
+        Some(rule) => rule.title,
+        None if finding.origin == Origin::Notation => finding.kind(),
+        None => {
+            return Err(RenderError::Check {
+                source: CheckError::UnknownRule { code: finding.code },
+            });
+        }
+    };
+    Ok(serde_json::json!({
         "id": finding.code,
         "name": finding.kind(),
         "shortDescription": { "text": title },
         "helpUri": finding.authority_url,
-    })
+    }))
 }
 
-fn result_json(document: &Document, finding: &Finding) -> serde_json::Value {
-    let start = finding.position(&document.report.decoded);
-    let end = aozora_proof_core::position(&document.report.decoded, finding.span.end);
+fn result_json(document: &Document, finding: &Finding) -> Result<serde_json::Value, RenderError> {
+    let start = finding
+        .position(&document.report.decoded)
+        .map_err(|source| RenderError::Check { source })?;
+    let end = aozora_proof_core::position(&document.report.decoded, finding.span.end)
+        .map_err(|source| RenderError::Check { source })?;
     let region = serde_json::json!({
         "startLine": start.line,
         "startColumn": start.column,
         "endLine": end.line,
         "endColumn": end.column,
     });
-    let fixes: Vec<_> = finding
-        .fixes
-        .iter()
-        .filter_map(|fix| match &fix.operation {
-            FixOperation::Text(edit) => {
-                let edit_start =
-                    aozora_proof_core::position(&document.report.decoded, edit.span.start);
-                let edit_end = aozora_proof_core::position(&document.report.decoded, edit.span.end);
-                Some(serde_json::json!({
-                    "description": { "text": fix.label },
-                    "artifactChanges": [{
-                        "artifactLocation": { "uri": document.label },
-                        "replacements": [{
-                            "deletedRegion": {
-                                "startLine": edit_start.line,
-                                "startColumn": edit_start.column,
-                                "endLine": edit_end.line,
-                                "endColumn": edit_end.column,
-                            },
-                            "insertedContent": { "text": edit.replacement },
-                        }]
+    let mut fixes = Vec::new();
+    for fix in &finding.fixes {
+        if let FixOperation::Text(edit) = &fix.operation {
+            let edit_start = aozora_proof_core::position(&document.report.decoded, edit.span.start)
+                .map_err(|source| RenderError::Check { source })?;
+            let edit_end = aozora_proof_core::position(&document.report.decoded, edit.span.end)
+                .map_err(|source| RenderError::Check { source })?;
+            fixes.push(serde_json::json!({
+                "description": { "text": fix.label },
+                "artifactChanges": [{
+                    "artifactLocation": { "uri": document.label },
+                    "replacements": [{
+                        "deletedRegion": {
+                            "startLine": edit_start.line,
+                            "startColumn": edit_start.column,
+                            "endLine": edit_end.line,
+                            "endColumn": edit_end.column,
+                        },
+                        "insertedContent": { "text": edit.replacement },
                     }]
-                }))
-            }
-            FixOperation::RemoveBom
-            | FixOperation::NormalizeCrLf
-            | FixOperation::EnsureFinalNewline
-            | FixOperation::EncodeShiftJis => None,
-        })
-        .collect();
-    serde_json::json!({
+                }]
+            }));
+        }
+    }
+    Ok(serde_json::json!({
         "ruleId": finding.code,
         "level": sarif_level(finding.severity),
         "message": { "text": finding.message },
@@ -264,7 +301,7 @@ fn result_json(document: &Document, finding: &Finding) -> serde_json::Value {
             }
         }],
         "fixes": fixes,
-    })
+    }))
 }
 
 fn severity_style(severity: Severity) -> Style {

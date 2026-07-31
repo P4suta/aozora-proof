@@ -6,6 +6,11 @@
 //! and to message-wording changes); clean inputs must produce nothing; the
 //! notation and encoding cases assert by origin / code presence.
 
+#![allow(
+    clippy::expect_used,
+    reason = "test fixtures are required to produce complete reports"
+)]
+
 use aozora_proof_core::{FixOperation, Orthography, run_all, run_submission_with_orthography};
 
 /// `(name, input, finding codes that MUST be present)` — empty means "clean".
@@ -59,7 +64,7 @@ const CHAR_CASES: &[(&str, &str, &[&str])] = &[
 #[test]
 fn char_level_corpus() {
     for (name, input, expected) in CHAR_CASES {
-        let report = run_all(input.as_bytes());
+        let report = run_all(input.as_bytes()).expect("conformance input checks");
         let codes: Vec<&str> = report.findings.iter().map(|f| f.code).collect();
         if expected.is_empty() {
             assert!(
@@ -79,7 +84,7 @@ fn char_level_corpus() {
 
 #[test]
 fn gaiji_layer_suggests_a_chuki_for_a_needs_chuki_char() {
-    let report = run_all("\u{3094}".as_bytes());
+    let report = run_all("\u{3094}".as_bytes()).expect("gaiji input checks");
     let f = report
         .findings
         .iter()
@@ -97,13 +102,19 @@ fn gaiji_layer_suggests_a_chuki_for_a_needs_chuki_char() {
             edit.replacement
         );
         assert!(edit.replacement.contains("第3水準1-4-84"));
-        assert!(run_all(edit.replacement.as_bytes()).findings.is_empty());
+        assert!(
+            run_all(edit.replacement.as_bytes())
+                .expect("suggestion checks")
+                .findings
+                .is_empty()
+        );
     }
 }
 
 #[test]
 fn overlapping_kyuji_and_gaiji_yields_one_clean_suggestion() {
-    let report = run_submission_with_orthography("卽".as_bytes(), Orthography::Modern);
+    let report = run_submission_with_orthography("卽".as_bytes(), Orthography::Modern)
+        .expect("orthography input checks");
     let suggested: Vec<&str> = report
         .findings
         .iter()
@@ -125,11 +136,8 @@ fn overlapping_kyuji_and_gaiji_yields_one_clean_suggestion() {
 
 #[test]
 fn invalid_encoding_is_reported() {
-    let report = run_all(&[0xFF, 0xFE, 0xFF]);
-    assert!(
-        report
-            .findings
-            .iter()
-            .any(|f| f.code == "aozora::proof::encoding::invalid")
-    );
+    assert!(matches!(
+        run_all(&[0xFF, 0xFE, 0xFF]),
+        Err(aozora_proof_core::CheckError::Decode { .. })
+    ));
 }

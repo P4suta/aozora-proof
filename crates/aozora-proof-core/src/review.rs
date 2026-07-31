@@ -2,36 +2,44 @@
 
 use std::collections::BTreeMap;
 
+use crate::CheckError;
 use crate::finding::{Finding, FindingDetails, Origin, Span};
 use crate::rules::codes;
 
 /// Find candidates that require comparison with the base edition.
-#[must_use]
-pub fn check(text: &str) -> Vec<Finding> {
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when catalog lookup or checked span arithmetic
+/// fails.
+pub fn check(text: &str) -> Result<Vec<Finding>, CheckError> {
     let mut findings = Vec::new();
     let characters: Vec<(usize, char)> = text.char_indices().collect();
     for (index, &(offset, character)) in characters.iter().enumerate() {
         if matches!(character, 'ケ' | 'ヶ') {
             findings.push(review_finding(
                 codes::SMALL_KE,
-                span(offset, character),
+                span(offset, character)?,
                 (
                     format!("Form {character:?} requires confirmation against the base edition."),
                     format!("「{character}」の字体を底本で確認してください。"),
                 ),
                 character,
-            ));
+            )?);
         }
 
         let previous = index
             .checked_sub(1)
             .and_then(|position| characters.get(position))
             .map(|&(_, value)| value);
-        let next = characters.get(index + 1).map(|&(_, value)| value);
+        let next_index = index.checked_add(1).ok_or(CheckError::CoordinateOverflow {
+            operation: "advancing a review-candidate index",
+        })?;
+        let next = characters.get(next_index).map(|&(_, value)| value);
         if suspicious_ocr_context(previous, character, next) {
             findings.push(review_finding(
                 codes::OCR_SIMILAR,
-                span(offset, character),
+                span(offset, character)?,
                 (
                     format!(
                         "OCR-confusable character {character:?} occurs in a suspicious script context."
@@ -39,13 +47,13 @@ pub fn check(text: &str) -> Vec<Finding> {
                     format!("OCR 類似字「{character}」が不自然な文字種の並びにあります。"),
                 ),
                 character,
-            ));
+            )?);
         }
 
         if contextual_ascii(character, previous, next) {
             findings.push(review_finding(
                 codes::SPACING,
-                span(offset, character),
+                span(offset, character)?,
                 (
                     format!(
                         "ASCII spacing or punctuation {character:?} occurs in Japanese context."
@@ -53,11 +61,11 @@ pub fn check(text: &str) -> Vec<Finding> {
                     format!("和文の文脈に半角空白・記号「{character}」があります。"),
                 ),
                 character,
-            ));
+            )?);
         }
     }
-    findings.extend(ruby_grouping_candidates(text));
-    findings
+    findings.extend(ruby_grouping_candidates(text)?);
+    Ok(findings)
 }
 
 fn suspicious_ocr_context(previous: Option<char>, character: char, next: Option<char>) -> bool {
@@ -78,10 +86,16 @@ fn contextual_ascii(character: char, previous: Option<char>, next: Option<char>)
     }
 }
 
-fn ruby_grouping_candidates(text: &str) -> Vec<Finding> {
+fn ruby_grouping_candidates(text: &str) -> Result<Vec<Finding>, CheckError> {
     let mut findings = Vec::new();
     for (close, _) in text.match_indices('》') {
-        let Some(rest) = text.get(close + '》'.len_utf8()..) else {
+        let after_close =
+            close
+                .checked_add('》'.len_utf8())
+                .ok_or(CheckError::CoordinateOverflow {
+                    operation: "advancing beyond a ruby delimiter",
+                })?;
+        let Some(rest) = text.get(after_close..) else {
             continue;
         };
         let line = rest.lines().next().unwrap_or(rest);
@@ -94,22 +108,23 @@ fn ruby_grouping_candidates(text: &str) -> Vec<Finding> {
         if base.is_empty() || !base.chars().all(is_cjk) {
             continue;
         }
-        let start = close + '》'.len_utf8();
-        let end = start + open;
+        let start = after_close;
+        let end = start
+            .checked_add(open)
+            .ok_or(CheckError::CoordinateOverflow {
+                operation: "computing a ruby-grouping span",
+            })?;
         findings.push(Finding::from_rule(
             codes::RUBY_GROUPING,
             Origin::Notation,
-            Span {
-                start: u32::try_from(start).unwrap_or(u32::MAX),
-                end: u32::try_from(end).unwrap_or(u32::MAX),
-            },
+            Span::try_from_usize(start, end)?,
             FindingDetails::new(
                 "Adjacent ruby groups may be over-divided.".to_owned(),
                 "隣接するルビが過分割されている可能性があります。".to_owned(),
             ),
-        ));
+        )?);
     }
-    findings
+    Ok(findings)
 }
 
 fn review_finding(
@@ -117,7 +132,7 @@ fn review_finding(
     character_span: Span,
     messages: (String, String),
     character: char,
-) -> Finding {
+) -> Result<Finding, CheckError> {
     Finding::from_rule(
         code,
         Origin::Submission,
@@ -131,11 +146,13 @@ fn review_finding(
     )
 }
 
-fn span(offset: usize, character: char) -> Span {
-    Span {
-        start: u32::try_from(offset).unwrap_or(u32::MAX),
-        end: u32::try_from(offset + character.len_utf8()).unwrap_or(u32::MAX),
-    }
+fn span(offset: usize, character: char) -> Result<Span, CheckError> {
+    let end = offset
+        .checked_add(character.len_utf8())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing a review-candidate span",
+        })?;
+    Span::try_from_usize(offset, end)
 }
 
 const fn is_cjk(character: char) -> bool {
@@ -158,16 +175,19 @@ mod tests {
     fn candidates_are_contextual() {
         assert!(
             check("漢タ字")
+                .expect("review check")
                 .iter()
                 .any(|finding| finding.code == codes::OCR_SIMILAR)
         );
         assert!(
             check("青 空")
+                .expect("review check")
                 .iter()
                 .any(|finding| finding.code == codes::SPACING)
         );
         assert_eq!(
             check("(青空)")
+                .expect("review check")
                 .iter()
                 .filter(|finding| finding.code == codes::SPACING)
                 .count(),
@@ -175,6 +195,7 @@ mod tests {
         );
         assert!(
             check("一ヶ月")
+                .expect("review check")
                 .iter()
                 .any(|finding| finding.code == codes::SMALL_KE)
         );

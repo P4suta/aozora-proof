@@ -4,6 +4,7 @@ use std::str::from_utf8;
 
 use aozora::has_utf8_bom;
 
+use crate::CheckError;
 use crate::finding::{
     Finding, FindingDetails, FixAlternative, FixApplicability, FixOperation, Origin, Span,
 };
@@ -87,22 +88,20 @@ pub fn detect_line_ending(raw: &[u8]) -> LineEnding {
     let mut crlf = false;
     let mut lf = false;
     let mut cr = false;
-    let mut index = 0usize;
-    while let Some(byte) = raw.get(index) {
+    let mut bytes = raw.iter().peekable();
+    while let Some(byte) = bytes.next() {
         match *byte {
-            b'\r' if raw.get(index + 1) == Some(&b'\n') => {
+            b'\r' if bytes.peek() == Some(&&b'\n') => {
                 crlf = true;
-                index += 2;
+                bytes.next();
             }
             b'\r' => {
                 cr = true;
-                index += 1;
             }
             b'\n' => {
                 lf = true;
-                index += 1;
             }
-            _ => index += 1,
+            _ => {}
         }
     }
     match (crlf, lf, cr) {
@@ -115,8 +114,11 @@ pub fn detect_line_ending(raw: &[u8]) -> LineEnding {
 }
 
 /// Run format checks that apply to every decoded document.
-#[must_use]
-pub fn check(raw: &[u8]) -> Vec<Finding> {
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when a required rule is absent from the catalog.
+pub fn check(raw: &[u8]) -> Result<Vec<Finding>, CheckError> {
     let mut findings = Vec::new();
     if has_utf8_bom(raw) {
         findings.push(file_finding(
@@ -130,7 +132,7 @@ pub fn check(raw: &[u8]) -> Vec<Finding> {
                 "Remove the byte-order mark",
                 "BOM を削除",
             ),
-        ));
+        )?);
     }
 
     let ending = detect_line_ending(raw);
@@ -146,19 +148,22 @@ pub fn check(raw: &[u8]) -> Vec<Finding> {
                 "Normalize line endings to CRLF",
                 "改行を CRLF に統一",
             ),
-        );
+        )?;
         finding
             .data
-            .insert("detected".to_owned(), ending.as_wire_str().to_owned());
+            .extend([("detected".to_owned(), ending.as_wire_str().to_owned())]);
         findings.push(finding);
     }
 
-    findings
+    Ok(findings)
 }
 
 /// Run checks required specifically for a submission artifact.
-#[must_use]
-pub fn check_submission(raw: &[u8]) -> Vec<Finding> {
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when a required rule is absent from the catalog.
+pub fn check_submission(raw: &[u8]) -> Result<Vec<Finding>, CheckError> {
     let mut findings = Vec::new();
     if detect_encoding(raw) == DetectedEncoding::Utf8 {
         findings.push(file_finding(
@@ -172,7 +177,7 @@ pub fn check_submission(raw: &[u8]) -> Vec<Finding> {
                 "Encode losslessly as Shift_JIS",
                 "Shift_JIS へ無損失変換",
             ),
-        ));
+        )?);
     }
     if !raw.is_empty() && !raw.ends_with(b"\n") && !raw.ends_with(b"\r") {
         findings.push(file_finding(
@@ -186,16 +191,16 @@ pub fn check_submission(raw: &[u8]) -> Vec<Finding> {
                 "Add the final line ending",
                 "末尾改行を追加",
             ),
-        ));
+        )?);
     }
-    findings
+    Ok(findings)
 }
 
 fn file_finding(
     code: &'static str,
     messages: (&str, &str),
     fix: (FixOperation, &str, &str),
-) -> Finding {
+) -> Result<Finding, CheckError> {
     Finding::from_rule(
         code,
         Origin::Character,
@@ -225,7 +230,7 @@ mod tests {
 
     #[test]
     fn format_findings_have_safe_operations() {
-        let findings = check(b"a\nb");
+        let findings = check(b"a\nb").expect("catalog-backed findings");
         assert!(
             findings
                 .iter()

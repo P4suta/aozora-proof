@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 use std::env;
-use std::error::Error;
-use std::fmt;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::config::Resolved;
@@ -19,18 +18,18 @@ impl Input {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct DiscoveryError {
-    message: String,
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DiscoveryError {
+    #[error("{message}")]
+    Message { message: String },
+    #[error("{}: could not {operation}: {source}", path.display())]
+    Io {
+        path: PathBuf,
+        operation: &'static str,
+        #[source]
+        source: io::Error,
+    },
 }
-
-impl fmt::Display for DiscoveryError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for DiscoveryError {}
 
 pub(crate) fn discover(
     requested: &[PathBuf],
@@ -41,7 +40,8 @@ pub(crate) fn discover(
     } else {
         requested.to_vec()
     };
-    let current = env::current_dir().map_err(|source| message(source.to_string()))?;
+    let current = env::current_dir()
+        .map_err(|source| io_error(Path::new("."), "resolve the current directory", source))?;
     let mut inputs = Vec::new();
     let mut stdin_seen = false;
 
@@ -63,7 +63,7 @@ pub(crate) fn discover(
             current.join(path)
         };
         let metadata = fs::metadata(&absolute)
-            .map_err(|source| message(format!("{}: {source}", path.display())))?;
+            .map_err(|source| io_error(path, "read input metadata", source))?;
         if metadata.is_file() {
             inputs.push(Input {
                 path: Some(absolute),
@@ -117,9 +117,9 @@ struct Walker<'a> {
 impl Walker<'_> {
     fn walk(&mut self, directory: &Path) -> Result<(), DiscoveryError> {
         let mut entries: Vec<fs::DirEntry> = fs::read_dir(directory)
-            .map_err(|source| message(source.to_string()))?
+            .map_err(|source| io_error(directory, "read directory", source))?
             .collect::<Result<_, _>>()
-            .map_err(|source| message(source.to_string()))?;
+            .map_err(|source| io_error(directory, "read a directory entry", source))?;
         entries.sort_by_key(fs::DirEntry::file_name);
 
         for entry in entries {
@@ -137,7 +137,7 @@ impl Walker<'_> {
         let relative_label = normalize(relative);
         let file_type = entry
             .file_type()
-            .map_err(|source| message(source.to_string()))?;
+            .map_err(|source| io_error(&path, "read file type", source))?;
         if self.ignores.ignored(&relative_label, file_type.is_dir()) {
             return Ok(());
         }
@@ -191,7 +191,7 @@ impl IgnoreRules {
                 continue;
             }
             let content = fs::read_to_string(&path)
-                .map_err(|source| message(format!("{}: {source}", path.display())))?;
+                .map_err(|source| io_error(&path, "read ignore rules", source))?;
             for line in content.lines() {
                 let line = line.trim();
                 if line.is_empty() || line.starts_with('#') {
@@ -271,8 +271,16 @@ fn normalize(path: &Path) -> String {
 }
 
 fn message(value: impl Into<String>) -> DiscoveryError {
-    DiscoveryError {
+    DiscoveryError::Message {
         message: value.into(),
+    }
+}
+
+fn io_error(path: &Path, operation: &'static str, source: io::Error) -> DiscoveryError {
+    DiscoveryError::Io {
+        path: path.to_path_buf(),
+        operation,
+        source,
     }
 }
 

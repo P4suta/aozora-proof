@@ -15,9 +15,7 @@ pub(crate) mod output;
 pub(crate) mod review;
 
 use std::collections::BTreeSet;
-use std::error::Error;
 use std::fmt;
-use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -56,7 +54,7 @@ fn main() -> ExitCode {
         },
         Err(error) => {
             eprintln!("aozora-proof: {error}");
-            ExitCode::from(error.code)
+            ExitCode::from(error.code())
         }
     }
 }
@@ -76,19 +74,40 @@ impl Outcome {
     }
 }
 
-#[derive(Debug)]
-struct AppError {
-    code: u8,
-    message: String,
+#[derive(Debug, thiserror::Error)]
+enum AppError {
+    #[error("{message}")]
+    Usage { message: String },
+    #[error(transparent)]
+    Config(#[from] config::ConfigError),
+    #[error(transparent)]
+    Discovery(#[from] discovery::DiscoveryError),
+    #[error(transparent)]
+    Document(#[from] document::DocumentError),
+    #[error(transparent)]
+    Fix(#[from] fix_command::FixCommandError),
+    #[error(transparent)]
+    Review(#[from] review::ReviewError),
+    #[error(transparent)]
+    Render(#[from] output::RenderError),
 }
 
-impl fmt::Display for AppError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+impl AppError {
+    const fn code(&self) -> u8 {
+        match self {
+            Self::Render(_) => 3,
+            Self::Document(source) if source.is_internal() => 3,
+            Self::Fix(source) if source.is_internal() => 3,
+            Self::Review(source) if source.is_internal() => 3,
+            Self::Usage { .. }
+            | Self::Config(_)
+            | Self::Discovery(_)
+            | Self::Document(_)
+            | Self::Fix(_)
+            | Self::Review(_) => 2,
+        }
     }
 }
-
-impl Error for AppError {}
 
 fn dispatch(cli: Cli) -> Result<Outcome, AppError> {
     let global_color = cli.color;
@@ -113,7 +132,7 @@ fn dispatch(cli: Cli) -> Result<Outcome, AppError> {
             Ok(run_rules(&settings))
         }
         Command::Init(args) => {
-            let path = config::init(args.user).map_err(usage)?;
+            let path = config::init(args.user)?;
             Ok(Outcome::success(
                 format!("created {}\n", path.display()).into_bytes(),
             ))
@@ -148,11 +167,9 @@ fn run_check(
         color,
         language,
     };
-    let mut settings =
-        config::resolve(&args.paths, args.document.config.as_deref(), flags).map_err(usage)?;
+    let mut settings = config::resolve(&args.paths, args.document.config.as_deref(), flags)?;
     let has_stdin = paths_have_stdin(&args.paths);
-    config::require_orthography(&mut settings, !has_stdin && !args.document.no_input)
-        .map_err(usage)?;
+    config::require_orthography(&mut settings, !has_stdin && !args.document.no_input)?;
     if args.watch {
         return run_watch(args, flags, &settings);
     }
@@ -160,14 +177,14 @@ fn run_check(
 }
 
 fn check_once(paths: &[PathBuf], settings: &Resolved) -> Result<Outcome, AppError> {
-    let inputs = discovery::discover(paths, settings).map_err(usage)?;
-    let documents = document::load(&inputs, settings).map_err(usage)?;
+    let inputs = discovery::discover(paths, settings)?;
+    let documents = document::load(&inputs, settings)?;
     let stdout = output::render(
         &documents,
         settings.format,
         settings.language,
         Painter::resolve(settings.color),
-    );
+    )?;
     let code = check_exit(&documents, settings.fail_on);
     Ok(Outcome { stdout, code })
 }
@@ -183,16 +200,14 @@ fn run_fix(
         language,
         ..FlagValues::default()
     };
-    let mut settings =
-        config::resolve(&args.paths, args.document.config.as_deref(), flags).map_err(usage)?;
+    let mut settings = config::resolve(&args.paths, args.document.config.as_deref(), flags)?;
     config::require_orthography(
         &mut settings,
         !paths_have_stdin(&args.paths) && !args.document.no_input,
-    )
-    .map_err(usage)?;
-    let inputs = discovery::discover(&args.paths, &settings).map_err(usage)?;
-    let documents = document::load(&inputs, &settings).map_err(usage)?;
-    let output = fix_command::run(&documents, &settings, args.dry_run).map_err(usage)?;
+    )?;
+    let inputs = discovery::discover(&args.paths, &settings)?;
+    let documents = document::load(&inputs, &settings)?;
+    let output = fix_command::run(&documents, &settings, args.dry_run)?;
     if output.changed_files > 0 && !args.dry_run && !inputs.iter().any(discovery::Input::is_stdin) {
         eprintln!("aozora-proof: fixed {} file(s)", output.changed_files);
     }
@@ -213,15 +228,14 @@ fn run_review(
         language,
         ..FlagValues::default()
     };
-    let mut settings =
-        config::resolve(&args.paths, args.document.config.as_deref(), flags).map_err(usage)?;
-    config::require_orthography(&mut settings, !args.document.no_input).map_err(usage)?;
-    let inputs = discovery::discover(&args.paths, &settings).map_err(usage)?;
+    let mut settings = config::resolve(&args.paths, args.document.config.as_deref(), flags)?;
+    config::require_orthography(&mut settings, !args.document.no_input)?;
+    let inputs = discovery::discover(&args.paths, &settings)?;
     if inputs.iter().any(discovery::Input::is_stdin) {
         return Err(usage("review does not accept standard input"));
     }
-    let documents = document::load(&inputs, &settings).map_err(usage)?;
-    let changed = review::run(&documents).map_err(usage)?;
+    let documents = document::load(&inputs, &settings)?;
+    let changed = review::run(&documents)?;
     if changed > 0 {
         eprintln!("aozora-proof: wrote {changed} reviewed file(s)");
     }
@@ -284,9 +298,8 @@ fn run_watch(args: &CheckArgs, flags: FlagValues, initial: &Resolved) -> Result<
             .recv()
             .map_err(|source| usage(source.to_string()))?
             .map_err(usage)?;
-        let mut settings =
-            config::resolve(&args.paths, args.document.config.as_deref(), flags).map_err(usage)?;
-        config::require_orthography(&mut settings, false).map_err(usage)?;
+        let mut settings = config::resolve(&args.paths, args.document.config.as_deref(), flags)?;
+        config::require_orthography(&mut settings, false)?;
         let outcome = check_once(&args.paths, &settings)?;
         match write_watch_frame(&outcome.stdout) {
             Ok(()) => {}
@@ -319,19 +332,11 @@ fn reference_settings(
             ..FlagValues::default()
         },
     )
-    .map_err(usage)
+    .map_err(AppError::from)
 }
 
 fn run_explain(code: &str, settings: &Resolved) -> Result<Outcome, AppError> {
     let Some(rule) = explain(code) else {
-        if code.starts_with("aozora::lex::") {
-            return Ok(Outcome::success(
-                format!(
-                    "{code}\nUpstream aozora parser diagnostic.\nhttps://docs.rs/aozora/latest/aozora/\n"
-                )
-                .into_bytes(),
-            ));
-        }
         return Err(usage(format!("unknown rule code {code}")));
     };
     Ok(Outcome::success(
@@ -402,10 +407,15 @@ fn run_rules(settings: &Resolved) -> Outcome {
         DetectionClass::Review,
         DetectionClass::Manual,
     ] {
-        let _ = writeln!(text, "{}:", class.as_wire_str());
+        text.push_str(class.as_wire_str());
+        text.push_str(":\n");
         for rule in all_rules().iter().filter(|rule| rule.detection == class) {
             let title = if japanese { rule.title_ja } else { rule.title };
-            let _ = writeln!(text, "  {}  {title}", rule.code);
+            text.push_str("  ");
+            text.push_str(rule.code);
+            text.push_str("  ");
+            text.push_str(title);
+            text.push('\n');
         }
     }
     Outcome::success(text.into_bytes())
@@ -423,11 +433,13 @@ fn run_gaiji(command: GaijiCommand, settings: &Resolved) -> Result<Outcome, AppE
         GaijiCommand::Search { text } => {
             let mut output = String::new();
             for (description, character) in gaiji_dict::search(&text) {
-                let _ = writeln!(
-                    output,
-                    "{character}\tU+{:04X}\t{description}",
-                    u32::from(character)
-                );
+                output.push(character);
+                output.push_str("\tU+");
+                let codepoint = format!("{:04X}", u32::from(character));
+                output.push_str(&codepoint);
+                output.push('\t');
+                output.push_str(description);
+                output.push('\n');
             }
             Ok(Outcome::success(output.into_bytes()))
         }
@@ -457,26 +469,33 @@ fn format_gaiji(info: &GaijiInfo, language: LanguageArg) -> String {
     let japanese = language == LanguageArg::Ja;
     let mut output = String::new();
     let scalar_label = if japanese { "文字" } else { "character" };
-    let _ = writeln!(
-        output,
-        "{scalar_label}: {} (U+{:04X})",
-        info.character, info.codepoint
-    );
+    output.push_str(scalar_label);
+    output.push_str(": ");
+    output.push(info.character);
+    output.push_str(" (U+");
+    let codepoint = format!("{:04X}", info.codepoint);
+    output.push_str(&codepoint);
+    output.push_str(")\n");
     if let Some(position) = info.men_ku_ten {
-        let _ = writeln!(
-            output,
-            "men-ku-ten: {}-{}-{} ({})",
-            position.men,
-            position.ku,
-            position.ten,
-            position.level.label()
-        );
+        output.push_str("men-ku-ten: ");
+        output.push_str(&position.men.to_string());
+        output.push('-');
+        output.push_str(&position.ku.to_string());
+        output.push('-');
+        output.push_str(&position.ten.to_string());
+        output.push_str(" (");
+        output.push_str(position.level.label());
+        output.push_str(")\n");
     }
     for description in &info.descriptions {
-        let _ = writeln!(output, "description: {description}");
+        output.push_str("description: ");
+        output.push_str(description);
+        output.push('\n');
     }
     if let Some(annotation) = &info.chuki {
-        let _ = writeln!(output, "annotation: {annotation}");
+        output.push_str("annotation: ");
+        output.push_str(annotation);
+        output.push('\n');
     }
     output
 }
@@ -502,8 +521,7 @@ fn run_config(
                     language,
                     ..FlagValues::default()
                 },
-            )
-            .map_err(usage)?;
+            )?;
             Ok(Outcome::success(settings.show().into_bytes()))
         }
     }
@@ -548,8 +566,35 @@ fn write_stdout(bytes: &[u8]) -> io::Result<()> {
 }
 
 fn usage(source: impl fmt::Display) -> AppError {
-    AppError {
-        code: 2,
+    AppError::Usage {
         message: source.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aozora_proof_core::CheckError;
+
+    use super::*;
+
+    #[test]
+    fn cli_error_classes_keep_internal_failures_distinct() {
+        let external = AppError::Document(document::DocumentError::Check {
+            label: "<stdin>".to_owned(),
+            source: CheckError::SourceTooLarge { len: usize::MAX },
+        });
+        let internal = AppError::Document(document::DocumentError::Check {
+            label: "<stdin>".to_owned(),
+            source: CheckError::UnknownRule {
+                code: "aozora::proof::unknown",
+            },
+        });
+
+        assert_eq!(external.code(), 2);
+        assert_eq!(internal.code(), 3);
+        assert_eq!(
+            AppError::Render(output::RenderError::UnresolvedFormat).code(),
+            3
+        );
     }
 }
