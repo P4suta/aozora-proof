@@ -35,9 +35,16 @@ Only the facts meeting those conditions are promoted. The remaining data stays
 experimental. The parser does not gain proofreading policy, and the
 proofreader does not duplicate notation parsing.
 
-The core, data, and CLI packages stay non-publishable during the validation
-campaign. Corpus auditing is a development command rather than a supported CLI
-or wire contract.
+Every workspace package stays non-publishable during the validation campaign.
+The crate split is an internal implementation boundary, not a registry
+packaging plan. Corpus auditing is a development command rather than a
+supported CLI or wire contract.
+
+If distribution becomes useful, expose the smallest user-facing entry point
+that satisfies a demonstrated use case. Internal crates remain path-only unless
+an external consumer independently justifies their public API and release
+lifecycle. A release decision for one entry point does not imply publishing the
+whole `aozora-proof-*` family.
 
 ## Consequences
 
@@ -46,6 +53,7 @@ or wire contract.
 - A future renderer or editor can still trigger a narrow upstream promotion.
 - Registry publishing needs a separate explicit decision after the validation
   campaign.
+- Workspace modularity does not multiply the public SemVer surface.
 - The eager migrations tracked by #26 and #27 are no longer current work.
 
 ## Alternatives considered

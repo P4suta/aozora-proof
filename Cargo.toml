@@ -94,8 +94,8 @@ notify                = "8"
 notify-debouncer-mini = "0.7"
 
 # Internal workspace crates.
-aozora-proof-core = { version = "0.1.0", path = "crates/aozora-proof-core" }
-aozora-proof-data = { version = "0.1.0", path = "crates/aozora-proof-data" }
+aozora-proof-core = { path = "crates/aozora-proof-core" }
+aozora-proof-data = { path = "crates/aozora-proof-data" }
 
 [profile.release]
 lto           = "thin"

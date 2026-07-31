@@ -12,7 +12,8 @@ text — built to run locally, in **CI**, and in the browser as a static web app
 
 The project is currently an experimental validation tool. Its Rust crates are
 not published, and no compatibility promise is made for the internal API while
-the rules are measured against real works.
+the rules are measured against real works. The workspace crate split is not a
+plan to publish an `aozora-proof-*` package family.
 
 `aozora-proof` checks the **character level** of a manuscript — the layer the
 [`aozora`](https://github.com/P4suta/aozora) parser deliberately leaves alone —

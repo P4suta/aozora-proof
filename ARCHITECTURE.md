@@ -23,6 +23,8 @@ aozora-proof-wasm ──┘
 ```
 
 `cli` and `wasm` are façades over `core`; `core` bakes in `data`'s tables.
+These crates are private workspace modules. Their names and boundaries do not
+promise separate registry packages.
 
 | crate | role | boundary |
 |---|---|---|
@@ -36,7 +38,7 @@ The core stays pure so the *same* engine drives the CLI and the in-browser web a
 Character facts remain in the unpublished `aozora-proof-data` crate while the
 rules are validated. [ADR 0004](docs/adr/0004-promote-character-facts-on-demand.md)
 requires a real second consumer and conformance evidence before any individual
-fact becomes public `aozora` API.
+fact becomes public `aozora` API or any internal crate becomes a release unit.
 
 ## The pipeline
 
