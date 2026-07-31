@@ -64,14 +64,33 @@ jobs:
       - name: Locate successful qualification
         id: qualification
         env:
+          ARTIFACT_NAME: release-qualified-${{ inputs.commit }}
           COMMIT: ${{ inputs.commit }}
           GH_TOKEN: ${{ github.token }}
         run: |
           run_id=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/release-ready.yml/runs?head_sha=${COMMIT}&status=success&event=push&per_page=10" \
-            --jq '[.workflow_runs[] | select(.head_sha == env.COMMIT)][0].id // empty')
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/release-ready.yml/runs?head_sha=${COMMIT}&status=success&per_page=100" \
+            --jq '.workflow_runs[]
+              | select(
+                  .head_sha == env.COMMIT
+                  and (.event == "push" or .event == "workflow_dispatch")
+                )
+              | [.created_at, (.id | tostring)]
+              | @tsv' |
+            sort --reverse |
+            while IFS=$'\t' read -r _ candidate; do
+              artifact_count=$(gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts?name=${ARTIFACT_NAME}" \
+                --jq '[.artifacts[]
+                  | select(.name == env.ARTIFACT_NAME and (.expired | not))]
+                  | length')
+              if [[ "$artifact_count" -gt 0 ]]; then
+                printf '%s\n' "$candidate"
+                break
+              fi
+            done)
           if [[ -z "$run_id" ]]; then
-            echo "no successful release-ready push run exists for $COMMIT" >&2
+            echo "no successful release-ready run with qualified artifacts exists for $COMMIT" >&2
             exit 1
           fi
           echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
