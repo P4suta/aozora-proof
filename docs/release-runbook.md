@@ -63,4 +63,14 @@ draft, replaces draft assets only before publication, and treats an already
 published verified release as complete.
 
 If `release-ready` failed, there is no qualified aggregate artifact and
-recovery stops before any tag or draft is created.
+recovery stops before any tag or draft is created. After merging an
+infrastructure-only fix, explicitly requalify that exact commit on `main`:
+
+```console
+$ gh workflow run release-ready.yml --ref main \
+    --field commit=0123456789abcdef0123456789abcdef01234567
+```
+
+Manual qualification accepts only a full commit SHA contained in `main` and
+does not dispatch publication automatically. Once it succeeds, use the
+`release.yml` dry-run recovery above.

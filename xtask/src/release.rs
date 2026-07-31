@@ -130,12 +130,14 @@ pub(crate) fn run(mut args: impl Iterator<Item = OsString>) -> Result<String, St
             let release_pr = options
                 .get("--release-pr")
                 .is_some_and(|value| value == "true");
+            let manual = options.get("--manual").is_some_and(|value| value == "true");
             let full = should_qualify(
                 event,
                 reference,
                 Qualification {
                     version_changed: changed,
                     release_pr,
+                    manual,
                 },
             );
             println!("full={full}");
@@ -687,15 +689,16 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 struct Qualification {
     version_changed: bool,
     release_pr: bool,
+    manual: bool,
 }
 
 fn should_qualify(event: &str, reference: &str, qualification: Qualification) -> bool {
-    qualification.version_changed
-        && match event {
-            "push" => reference == "refs/heads/main",
-            "pull_request" => qualification.release_pr,
-            _ => false,
-        }
+    match event {
+        "push" => qualification.version_changed && reference == "refs/heads/main",
+        "pull_request" => qualification.release_pr,
+        "workflow_dispatch" => qualification.manual && reference == "refs/heads/main",
+        _ => false,
+    }
 }
 
 fn check_artifact_manifest(
@@ -1143,6 +1146,7 @@ mod tests {
             Qualification {
                 version_changed: false,
                 release_pr: false,
+                manual: false,
             }
         ));
         assert!(!should_qualify(
@@ -1151,14 +1155,34 @@ mod tests {
             Qualification {
                 version_changed: true,
                 release_pr: false,
+                manual: false,
             }
         ));
         assert!(should_qualify(
             "pull_request",
             "refs/pull/7/merge",
             Qualification {
-                version_changed: true,
+                version_changed: false,
                 release_pr: true,
+                manual: false,
+            }
+        ));
+        assert!(should_qualify(
+            "workflow_dispatch",
+            "refs/heads/main",
+            Qualification {
+                version_changed: false,
+                release_pr: false,
+                manual: true,
+            }
+        ));
+        assert!(!should_qualify(
+            "workflow_dispatch",
+            "refs/heads/fix",
+            Qualification {
+                version_changed: false,
+                release_pr: false,
+                manual: true,
             }
         ));
     }

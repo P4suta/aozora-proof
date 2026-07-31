@@ -5,13 +5,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    inputs:
+      commit:
+        description: "Exact full main commit SHA to requalify after an infrastructure fix"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-ready-${{ github.event.pull_request.head.sha || github.sha }}
+  group: release-ready-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 env:
@@ -29,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
@@ -38,13 +44,25 @@ jobs:
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          COMMIT: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
           RELEASE_LABEL: "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}"
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
+          manual=false
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            if ! [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "manual qualification requires a full lowercase commit SHA" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
+              echo "manual qualification commit is not on main" >&2
+              exit 1
+            fi
+            manual=true
+          fi
           changed=false
           if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
              ! [[ "$BASE_SHA" =~ ^0{40}$ ]] &&
@@ -60,7 +78,8 @@ jobs:
             --event "$EVENT_NAME" \
             --ref "$REF" \
             --version-changed "$changed" \
-            --release-pr "$release_pr")
+            --release-pr "$release_pr" \
+            --manual "$manual")
           full=${decision#full=}
           version=$(tr -d '[:space:]' <version.txt)
           {
@@ -134,7 +153,8 @@ jobs:
           "$binary" --help >/dev/null
           set +e
           "$binary" check --orthography mixed --no-input --format json \
-            crates/aozora-proof-core/tests/fixtures/mutations/control-character.txt \
+            --fail-on warning \
+            crates/aozora-proof-core/tests/fixtures/mutations/halfwidth-katakana.txt \
             >release-smoke.json
           status=$?
           set -e
@@ -142,7 +162,13 @@ jobs:
             echo "representative check returned $status, expected finding exit 1" >&2
             exit 1
           fi
-          jq --exit-status '.schemaVersion == 2' release-smoke.json >/dev/null
+          jq --exit-status '
+            .schemaVersion == 2 and
+            any(
+              .files[].findings[];
+              .code == "aozora::proof::character::halfwidth_kana"
+            )
+          ' release-smoke.json >/dev/null
 
           package="aozora-proof-v${VERSION}-${TARGET}"
           mkdir -p "dist/${package}/bin"
