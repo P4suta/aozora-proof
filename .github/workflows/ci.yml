@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,10 +23,13 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          tools: cargo-nextest@0.9
+          tools: cargo-nextest@0.9.137
       - run: cargo nextest run --workspace --all-targets
       - run: cargo test --workspace --doc
 
@@ -31,7 +37,10 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
@@ -45,10 +54,12 @@ jobs:
         run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
+      - name: release contract
+        run: cargo run --locked -p xtask -- release check
       - name: typos
-        uses: crate-ci/typos@master
+        uses: crate-ci/typos@3e8e1dbf18c56a9ed625484ca941497c73e7da2c # v1.47.2
       - name: lint tools
-        uses: taiki-e/install-action@v2.85.3
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: taplo@0.10.0, shellcheck@0.11.0
       - name: install actionlint
@@ -66,18 +77,18 @@ jobs:
     name: deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
 
   coverage:
     name: coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: ./.github/actions/setup-rust
         with:
           components: llvm-tools-preview
-          tools: cargo-llvm-cov@0.8
+          tools: cargo-llvm-cov@0.8.7
       - name: Collect coverage (run tests once)
         run: cargo llvm-cov --workspace --no-report
       - name: Report (lcov + HTML + summary)
@@ -86,7 +97,7 @@ jobs:
           cargo llvm-cov report --html
           cargo llvm-cov report --summary-only
       - name: Upload coverage report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage
           path: |
@@ -98,19 +109,19 @@ jobs:
     name: web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: ./.github/actions/setup-rust
         with:
           targets: wasm32-unknown-unknown
-          tools: wasm-pack@0.15
+          tools: wasm-pack@0.15.0
       - name: Build wasm package (→ web/src/lib/pkg)
         run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/src/lib/pkg
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 11
-      - uses: actions/setup-node@v6
+          version: 11.18.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
+          node-version: 24.16.0
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install web deps
@@ -127,3 +138,20 @@ jobs:
         working-directory: web
         env:
           BASE_PATH: /aozora-proof
+
+  ci-success:
+    name: ci-success
+    if: always()
+    needs: [test, lint, deny, coverage, web]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every gating job
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          if jq --exit-status 'all(.[]; .result == "success")' <<<"$NEEDS" >/dev/null; then
+            echo "all CI gates passed"
+          else
+            jq . <<<"$NEEDS"
+            exit 1
+          fi

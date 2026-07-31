@@ -1,0 +1,306 @@
+name: release-ready
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-ready-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  qualify:
+    name: decide qualification
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.decision.outputs.commit }}
+      full: ${{ steps.decision.outputs.full }}
+      version: ${{ steps.decision.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Decide whether this commit carries a release
+        id: decision
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          RELEASE_LABEL: "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}"
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          changed=false
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+             ! [[ "$BASE_SHA" =~ ^0{40}$ ]] &&
+             ! git diff --quiet "$BASE_SHA" "$COMMIT" -- version.txt; then
+            changed=true
+          fi
+          release_pr=false
+          if [[ "$HEAD_REF" == release-please--branches--main--components--aozora-proof ||
+                "$RELEASE_LABEL" == "true" ]]; then
+            release_pr=true
+          fi
+          decision=$(cargo run --quiet --locked -p xtask -- release qualify \
+            --event "$EVENT_NAME" \
+            --ref "$REF" \
+            --version-changed "$changed" \
+            --release-pr "$release_pr")
+          full=${decision#full=}
+          version=$(tr -d '[:space:]' <version.txt)
+          {
+            echo "commit=$COMMIT"
+            echo "full=$full"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+          cargo run --quiet --locked -p xtask -- release check
+
+  no-op:
+    name: qualification no-op
+    if: needs.qualify.outputs.full != 'true'
+    needs: qualify
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "No release version change; qualification is intentionally a no-op."
+
+  build:
+    name: build ${{ matrix.target }}
+    if: needs.qualify.outputs.full == 'true'
+    needs: qualify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            platform: linux-x86_64
+            os: ubuntu-24.04
+            executable: aozora-proof
+          - target: aarch64-unknown-linux-musl
+            platform: linux-aarch64
+            os: ubuntu-24.04-arm
+            executable: aozora-proof
+          - target: x86_64-apple-darwin
+            platform: macos-x86_64
+            os: macos-15-intel
+            executable: aozora-proof
+          - target: aarch64-apple-darwin
+            platform: macos-aarch64
+            os: macos-15
+            executable: aozora-proof
+          - target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            os: windows-2025
+            executable: aozora-proof.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.qualify.outputs.commit }}
+          persist-credentials: false
+      - name: Install musl tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - uses: ./.github/actions/setup-rust
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build and smoke test
+        shell: bash
+        env:
+          COMMIT: ${{ needs.qualify.outputs.commit }}
+          EXECUTABLE: ${{ matrix.executable }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target "$TARGET" -p aozora-proof-cli
+          binary="target/${TARGET}/release/${EXECUTABLE}"
+          "$binary" --version | grep -F "aozora-proof ${VERSION} "
+          "$binary" --help >/dev/null
+          set +e
+          "$binary" check --orthography mixed --no-input --format json \
+            crates/aozora-proof-core/tests/fixtures/mutations/control-character.txt \
+            >release-smoke.json
+          status=$?
+          set -e
+          if [[ "$status" -ne 1 ]]; then
+            echo "representative check returned $status, expected finding exit 1" >&2
+            exit 1
+          fi
+          jq --exit-status '.schemaVersion == 2' release-smoke.json >/dev/null
+
+          package="aozora-proof-v${VERSION}-${TARGET}"
+          mkdir -p "dist/${package}/bin"
+          mkdir -p "dist/${package}/share/man/man1"
+          mkdir -p "dist/${package}/share/completions"
+          cp "$binary" "dist/${package}/bin/"
+          "$binary" man >"dist/${package}/share/man/man1/aozora-proof.1"
+          for shell in bash zsh fish powershell elvish; do
+            "$binary" completions "$shell" \
+              >"dist/${package}/share/completions/aozora-proof.${shell}"
+          done
+          cp README.md LICENSE-APACHE LICENSE-MIT NOTICE "dist/${package}/"
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: dist/aozora-proof-v${{ needs.qualify.outputs.version }}-${{ matrix.target }}
+          artifact-name: aozora-proof-v${{ needs.qualify.outputs.version }}-${{ matrix.target }}.spdx.json
+          output-file: dist/aozora-proof-v${{ needs.qualify.outputs.version }}-${{ matrix.target }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Archive qualified asset
+        shell: bash
+        env:
+          COMMIT: ${{ needs.qualify.outputs.commit }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          set -euo pipefail
+          package="aozora-proof-v${VERSION}-${TARGET}"
+          archive="${package}.tar.gz"
+          tar -C dist -czf "dist/${archive}" "$package"
+          if command -v sha256sum >/dev/null 2>&1; then
+            digest=$(sha256sum "dist/${archive}" | cut -d' ' -f1)
+          else
+            digest=$(shasum --algorithm 256 "dist/${archive}" | cut -d' ' -f1)
+          fi
+          printf '%s  %s\n' "$digest" "$archive" >"dist/${archive}.sha256"
+          jq --null-input \
+            --arg target "$TARGET" \
+            --arg platform "$PLATFORM" \
+            --arg archive "$archive" \
+            --arg sha256 "$digest" \
+            --arg sbom "${package}.spdx.json" \
+            '{
+              target: $target,
+              platform: $platform,
+              archive: $archive,
+              sha256: $sha256,
+              sbom: $sbom
+            }' >"dist/${TARGET}.artifact.json"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: qualified-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.spdx.json
+            dist/*.artifact.json
+          if-no-files-found: error
+          retention-days: 14
+
+  aggregate:
+    name: aggregate qualified artifacts
+    if: needs.qualify.outputs.full == 'true'
+    needs: [qualify, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.qualify.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: qualified-*
+          path: qualified
+          merge-multiple: true
+      - name: Create and validate aggregate manifest
+        shell: bash
+        env:
+          COMMIT: ${{ needs.qualify.outputs.commit }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          set -euo pipefail
+          jq --slurp \
+            --arg commit "$COMMIT" \
+            --arg version "$VERSION" \
+            '{
+              schemaVersion: 1,
+              commit: $commit,
+              version: $version,
+              reportSchemaVersion: 2,
+              artifacts: sort_by(.target)
+            }' qualified/*.artifact.json >qualified/release-manifest.json
+          (
+            cd qualified
+            sha256sum -- *.tar.gz | sort --key=2 >SHA256SUMS
+          )
+          cargo run --quiet --locked -p xtask -- release artifact-check \
+            qualified/release-manifest.json \
+            --commit "$COMMIT" \
+            --version "$VERSION"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-qualified-${{ needs.qualify.outputs.commit }}
+          path: qualified
+          if-no-files-found: error
+          retention-days: 14
+
+  dispatch-release:
+    name: dispatch qualified release
+    if: >-
+      github.event_name == 'push' &&
+      needs.qualify.outputs.full == 'true'
+    needs: [qualify, aggregate]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch exact qualified commit
+        env:
+          COMMIT: ${{ needs.qualify.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            --field commit="$COMMIT" \
+            --field dry_run=false
+
+  result:
+    name: release-ready
+    if: always()
+    needs: [qualify, no-op, aggregate, dispatch-release]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report qualification result
+        env:
+          AGGREGATE: ${{ needs.aggregate.result }}
+          DISPATCH: ${{ needs.dispatch-release.result }}
+          FULL: ${{ needs.qualify.outputs.full }}
+          NOOP: ${{ needs.no-op.result }}
+          QUALIFY: ${{ needs.qualify.result }}
+        run: |
+          if [[ "$QUALIFY" != "success" ]]; then
+            echo "qualification decision failed" >&2
+            exit 1
+          fi
+          if [[ "$FULL" != "true" ]]; then
+            [[ "$NOOP" == "success" ]]
+            exit
+          fi
+          [[ "$AGGREGATE" == "success" ]]
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            [[ "$DISPATCH" == "success" ]]
+          fi

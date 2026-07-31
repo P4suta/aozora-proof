@@ -1,4 +1,4 @@
-//! Process-level contract tests for the 0.2 command surface.
+//! Process-level contract tests for the initial 0.1 command surface.
 
 #![allow(
     clippy::panic_in_result_fn,
@@ -83,7 +83,7 @@ fn help_and_version_expose_the_v2_commands() -> Result<(), TestError> {
     ] {
         assert!(help_text.contains(command));
     }
-    assert!(version_text.starts_with("aozora-proof 0.2.0 ("));
+    assert!(version_text.starts_with(concat!("aozora-proof ", env!("CARGO_PKG_VERSION"), " (")));
     Ok(())
 }
 
@@ -192,10 +192,9 @@ fn successful_schema_v2_output_is_byte_stable() -> Result<(), TestError> {
     )?;
 
     assert!(output.status.success());
-    assert_eq!(
-        output.stdout,
-        include_bytes!("fixtures/schema-v2-empty.json")
-    );
+    let expected = include_str!("fixtures/schema-v2-empty.json")
+        .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
+    assert_eq!(output.stdout, expected.as_bytes());
     Ok(())
 }
 

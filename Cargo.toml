@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version       = "0.2.0"
+version       = "0.1.0"
 edition       = "2024"
 rust-version  = "1.95.0"
 license       = "Apache-2.0 OR MIT"
@@ -117,8 +117,8 @@ thiserror             = "2"
 syn                   = { version = "2", features = ["full", "visit"] }
 
 # Internal workspace crates.
-aozora-proof-core = { version = "0.2.0", path = "crates/aozora-proof-core" }
-aozora-proof-data = { version = "0.2.0", path = "crates/aozora-proof-data" }
+aozora-proof-core = { version = "0.1.0", path = "crates/aozora-proof-core" }
+aozora-proof-data = { version = "0.1.0", path = "crates/aozora-proof-data" }
 
 [profile.release]
 lto           = "thin"

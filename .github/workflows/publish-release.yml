@@ -1,0 +1,128 @@
+name: publish-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Qualified commit already tagged by release.yml"
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  attestations: read
+  contents: write
+
+concurrency:
+  group: publish-release-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: approve and publish
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+
+      - name: Revalidate tag, manifest, checksums, and attestations
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "commit must be a full lowercase SHA-1" >&2
+            exit 2
+          fi
+          version=$(tr -d '[:space:]' <version.txt)
+          if [[ "$TAG" != "v${version}" ]]; then
+            echo "tag $TAG does not match version $version" >&2
+            exit 1
+          fi
+          tag_commit=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')
+          if [[ "$tag_commit" != "$COMMIT" ]]; then
+            echo "tag $TAG points to $tag_commit, expected $COMMIT" >&2
+            exit 1
+          fi
+          cargo run --quiet --locked -p xtask -- release check --tag "$TAG"
+          mkdir release-assets
+          gh release download "$TAG" --dir release-assets
+          cargo run --quiet --locked -p xtask -- release artifact-check \
+            release-assets/release-manifest.json \
+            --commit "$COMMIT" \
+            --version "$version"
+          (
+            cd release-assets
+            sha256sum --check SHA256SUMS
+            for checksum in *.tar.gz.sha256; do
+              sha256sum --check "$checksum"
+            done
+          )
+          gh attestation verify release-assets/*.tar.gz --repo "$GITHUB_REPOSITORY"
+          expected_assets=$(
+            {
+              jq --raw-output \
+                '.artifacts[] | .archive, (.archive + ".sha256"), .sbom' \
+                release-assets/release-manifest.json
+              printf '%s\n' SHA256SUMS release-manifest.json
+            } | sort
+          )
+          actual_assets=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort)
+          [[ "$actual_assets" == "$expected_assets" ]]
+
+      - name: Publish verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          is_draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft')
+          if [[ "$is_draft" == "true" ]]; then
+            gh release edit "$TAG" --draft=false
+          else
+            echo "$TAG is already published; verification succeeded"
+          fi
+
+  action-smoke:
+    name: verify published Action
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - name: Create conformant Action fixture
+        id: fixture
+        shell: bash
+        run: |
+          fixture="$RUNNER_TEMP/action-clean.txt"
+          printf 'a\r\n' >"$fixture"
+          echo "file=$fixture" >>"$GITHUB_OUTPUT"
+          echo "version=$(tr -d '[:space:]' <version.txt)" >>"$GITHUB_OUTPUT"
+      - name: Run the published binary through the composite Action
+        uses: ./action
+        with:
+          files: ${{ steps.fixture.outputs.file }}
+          orthography: mixed
+          fail-on: error
+          version: ${{ steps.fixture.outputs.version }}
+          upload-sarif: "false"
+
+      - name: Dispatch synchronized Pages deployment
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh workflow run docs.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$TAG" \
+            --field commit="$COMMIT"

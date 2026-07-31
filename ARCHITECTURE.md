@@ -82,7 +82,7 @@ Schema v2 is a top-level object:
 ```json
 {
   "schemaVersion": 2,
-  "tool": {"name": "aozora-proof", "version": "0.2.0"},
+  "tool": {"name": "aozora-proof", "version": "X.Y.Z"},
   "summary": {},
   "files": []
 }

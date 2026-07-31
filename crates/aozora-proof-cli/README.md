@@ -1,6 +1,6 @@
 # aozora-proof-cli
 
-Private implementation crate for the `aozora-proof` 0.2 binary. It provides
+Private implementation crate for the `aozora-proof` binary. It provides
 submission `check`, safe `fix`, interactive `review`, reference commands,
 schema-v2 JSON and SARIF, deterministic discovery, layered configuration, and
 generated man/completion output.

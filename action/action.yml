@@ -19,9 +19,8 @@ inputs:
     required: false
     default: "error"
   version:
-    description: "aozora-proof release version to download."
+    description: "aozora-proof release version. Required for SHA or branch Action references."
     required: false
-    default: "0.2.0"
   upload-sarif:
     description: "Upload results to code scanning; requires security-events: write."
     required: false
@@ -34,11 +33,24 @@ runs:
       shell: bash
       env:
         ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_REF: ${{ github.action_ref }}
         GH_TOKEN: ${{ github.token }}
         INPUT_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
         version="${INPUT_VERSION#v}"
+        if [[ -z "$version" ]]; then
+          if [[ "$ACTION_REF" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            version="${BASH_REMATCH[1]}"
+          else
+            echo "aozora-proof: input 'version' is required when the Action is referenced by a branch or SHA (got '${ACTION_REF:-unknown}')" >&2
+            exit 2
+          fi
+        fi
+        if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "aozora-proof: version must be a stable X.Y.Z release (got '$version')" >&2
+          exit 2
+        fi
         tag="v${version}"
         case "${RUNNER_OS}-${RUNNER_ARCH}" in
           Linux-X64) target="x86_64-unknown-linux-musl" ;;
@@ -106,7 +118,7 @@ runs:
 
     - name: Upload SARIF
       if: ${{ inputs.upload-sarif == 'true' }}
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
       with:
         sarif_file: ${{ runner.temp }}/aozora-proof.sarif
 

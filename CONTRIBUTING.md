@@ -22,16 +22,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
 One command bootstraps everything — toolchain components, dev tools, git hooks:
 
 ```console
-$ ./bootstrap.sh      # installs cargo-binstall + just, then runs `just setup`
+$ ./bootstrap.sh      # installs the exact mise.lock tool set, then runs setup
 $ just doctor         # verify your toolchain + tools match what CI pins
 ```
 
-Already have `just`? `just setup` alone does the same. The pieces are also
+Already have `mise` and `just`? `just setup` alone does the same. The pieces are also
 available individually: `just setup-toolchain`, `just setup-tools`, `just hooks`.
-Cargo tool versions are pinned in [`dev-tools.txt`](./dev-tools.txt). The non-cargo
-lint tools (`actionlint`, `shellcheck`) come from mise or your package manager;
-CI installs them via `taiki-e/install-action`. The web app (`web/`) is a SvelteKit
-project — install Node 24+ and `pnpm`, then `pnpm -C web install`.
+Tool versions and download checksums are pinned by [`mise.toml`](./mise.toml),
+`.config/mise/config.toml`, and their `mise.lock` files; CI uses the same
+versions. The web app (`web/`) is a SvelteKit project provisioned with Node and
+pnpm by mise.
 
 ## Development loop
 
@@ -71,7 +71,7 @@ the full web gate (prettier + eslint + svelte-check + prerender build).
 
 - Add or update tests for behaviour changes.
 - Keep `cargo clippy … -D warnings` and `cargo fmt --all -- --check` clean.
-- Add a `CHANGELOG.md` entry under `[Unreleased]`.
+- Use a Conventional Commit PR title; Release Please generates the changelog.
 - PRs are reviewed via [`CODEOWNERS`](./.github/CODEOWNERS).
 
 ## License

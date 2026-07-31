@@ -1,0 +1,91 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-24.04
+    environment: release-please
+    steps:
+      - name: Create release App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: aozora-proof
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
+      - name: Create or update Release PR
+        id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Read Release PR
+        id: pr
+        if: steps.release.outputs.pr != ''
+        shell: bash
+        env:
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          branch=$(jq --raw-output '.headBranchName // empty' <<<"$PR_JSON")
+          number=$(jq --raw-output '.number // empty' <<<"$PR_JSON")
+          if [[ -z "$branch" || -z "$number" ]]; then
+            echo "release-please returned an incomplete PR object" >&2
+            exit 1
+          fi
+          echo "branch=$branch" >>"$GITHUB_OUTPUT"
+          echo "number=$number" >>"$GITHUB_OUTPUT"
+
+      - name: Check out Release PR
+        if: steps.pr.outputs.branch != ''
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ steps.pr.outputs.branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Rust
+        if: steps.pr.outputs.branch != ''
+        uses: ./.github/actions/setup-rust
+
+      - name: Synchronize release-generated files
+        if: steps.pr.outputs.branch != ''
+        run: cargo run --locked -p xtask -- release sync
+
+      - name: Commit synchronized files through GitHub
+        if: steps.pr.outputs.branch != ''
+        shell: bash
+        env:
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .github/scripts/commit-release-sync.sh
+
+      - name: Require manual squash merge
+        if: steps.pr.outputs.number != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          auto_merge=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [[ "$auto_merge" == "true" ]]; then
+            gh pr merge "$PR_NUMBER" --disable-auto
+          fi

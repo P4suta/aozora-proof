@@ -22,7 +22,7 @@ The tools deliberately differ at the product boundary:
 | Aozora notation structure | Character-oriented exceptions | Parsed spans from `aozora` |
 
 The public corpus shows why the differing defaults matter: broad character
-classes occur in hundreds of released files. Version 0.2 narrows its
+classes occur in hundreds of released files. Version 0.1 narrows its
 user-facing spacing rule by neighboring script and keeps every result in the
 review class.
 

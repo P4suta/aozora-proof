@@ -1,165 +1,211 @@
 name: release
 
 on:
-  push:
-    tags: ["v*.*.*"]
   workflow_dispatch:
+    inputs:
+      commit:
+        description: "Qualified full commit SHA to recover or publish"
+        required: true
+        type: string
+      dry_run:
+        description: "Verify qualification and assets without changing GitHub state"
+        required: true
+        default: true
+        type: boolean
 
 permissions:
+  actions: read
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
+concurrency:
+  group: release-${{ inputs.commit }}
+  cancel-in-progress: false
 
 jobs:
-  metadata:
-    name: release metadata
-    runs-on: ubuntu-latest
+  verify:
+    name: verify qualified commit
+    runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.metadata.outputs.version }}
+      qualification_run: ${{ steps.qualification.outputs.run_id }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-rust
-      - name: Validate tag and generate manuals
-        id: metadata
-        shell: bash
+      - name: Validate input
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          COMMIT: ${{ inputs.commit }}
         run: |
-          set -euo pipefail
-          version=$(cargo metadata --locked --no-deps --format-version 1 |
-            jq --raw-output '.packages[] | select(.name == "aozora-proof-cli") | .version')
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$RELEASE_TAG" != "v${version}" ]]; then
-            echo "tag $RELEASE_TAG does not match workspace version $version" >&2
+          if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "commit must be a full lowercase SHA-1" >&2
             exit 2
           fi
-          mkdir -p release-metadata/share/man/man1 release-metadata/share/completions
-          cargo run --locked --quiet -p aozora-proof-cli -- man \
-            > release-metadata/share/man/man1/aozora-proof.1
-          for shell in bash zsh fish powershell elvish; do
-            cargo run --locked --quiet -p aozora-proof-cli -- completions "$shell" \
-              > "release-metadata/share/completions/aozora-proof.${shell}"
-          done
-          cp README.md LICENSE-APACHE LICENSE-MIT NOTICE release-metadata/
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-metadata
-          path: release-metadata
-          if-no-files-found: error
 
-  build:
-    name: ${{ matrix.target }}
-    needs: metadata
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-24.04
-            executable: aozora-proof
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04
-            executable: aozora-proof
-          - target: x86_64-apple-darwin
-            os: macos-15
-            executable: aozora-proof
-          - target: aarch64-apple-darwin
-            os: macos-15
-            executable: aozora-proof
-          - target: x86_64-pc-windows-msvc
-            os: windows-2025
-            executable: aozora-proof.exe
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-      - name: Build release binary
-        uses: houseabsolute/actions-rust-cross@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          command: build
-          target: ${{ matrix.target }}
-          toolchain: "1.95.0"
-          args: "--locked --release -p aozora-proof-cli"
-          strip: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-metadata
-          path: release-metadata
-      - name: Package archive
-        shell: bash
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+
+      - name: Require commit on main
         env:
-          EXECUTABLE: ${{ matrix.executable }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          TARGET: ${{ matrix.target }}
-          WORKSPACE_VERSION: ${{ needs.metadata.outputs.version }}
+          COMMIT: ${{ inputs.commit }}
         run: |
-          set -euo pipefail
-          tag="$RELEASE_TAG"
-          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
-            tag="v${WORKSPACE_VERSION}-dev"
-          fi
-          package="aozora-proof-${tag}-${TARGET}"
-          mkdir -p "dist/${package}/bin"
-          cp "target/${TARGET}/release/${EXECUTABLE}" "dist/${package}/bin/"
-          cp -R release-metadata/. "dist/${package}/"
-          archive="${package}.tar.gz"
-          tar -C dist -czf "dist/${archive}" "$package"
-          (
-            cd dist
-            if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$archive" > "${archive}.sha256"
-            else
-              shasum --algorithm 256 "$archive" > "${archive}.sha256"
-            fi
-          )
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.target }}
-          path: |
-            dist/*.tar.gz
-            dist/*.sha256
-          if-no-files-found: error
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$COMMIT" origin/main
 
-  publish:
-    name: publish release
-    if: github.ref_type == 'tag'
-    needs: build
-    runs-on: ubuntu-latest
+      - name: Read and validate version
+        id: version
+        run: |
+          version=$(tr -d '[:space:]' <version.txt)
+          cargo run --quiet --locked -p xtask -- release check
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tag=v$version" >>"$GITHUB_OUTPUT"
+
+      - name: Locate successful qualification
+        id: qualification
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/release-ready.yml/runs?head_sha=${COMMIT}&status=success&event=push&per_page=10" \
+            --jq '[.workflow_runs[] | select(.head_sha == env.COMMIT)][0].id // empty')
+          if [[ -z "$run_id" ]]; then
+            echo "no successful release-ready push run exists for $COMMIT" >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-qualified-${{ inputs.commit }}
+          path: qualified
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.qualification.outputs.run_id }}
+
+      - name: Validate qualified assets
+        env:
+          COMMIT: ${{ inputs.commit }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo run --quiet --locked -p xtask -- release artifact-check \
+            qualified/release-manifest.json \
+            --commit "$COMMIT" \
+            --version "$VERSION"
+          (
+            cd qualified
+            sha256sum --check SHA256SUMS
+            for checksum in *.tar.gz.sha256; do
+              sha256sum --check "$checksum"
+            done
+          )
+
+      - name: Dry-run result
+        if: inputs.dry_run
+        env:
+          COMMIT: ${{ inputs.commit }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "dry-run verified qualified $COMMIT for $TAG; no GitHub state was changed"
+
+  draft:
+    name: create tag and draft
+    if: ${{ !inputs.dry_run }}
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment: release-please
     permissions:
-      actions: read
+      actions: write
       artifact-metadata: write
       attestations: write
-      contents: write
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v8
+      - name: Create release App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
-          pattern: release-*
-          path: release-assets
-          merge-multiple: true
-      - name: Write aggregate checksums
-        working-directory: release-assets
-        run: sha256sum -- *.tar.gz > SHA256SUMS
-      - name: Generate release SBOM
-        uses: anchore/sbom-action@v0
+          client-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: aozora-proof
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: release-assets
-          artifact-name: aozora-proof-${{ github.ref_name }}.spdx.json
-          output-file: release-assets/aozora-proof-${{ github.ref_name }}.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-      - name: Attest archives
-        uses: actions/attest@v4
+          name: release-qualified-${{ inputs.commit }}
+          path: qualified
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.verify.outputs.qualification_run }}
+
+      - name: Attest qualified archives
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
-          subject-path: release-assets/*.tar.gz
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: |
-            release-assets/*.tar.gz
-            release-assets/*.sha256
-            release-assets/SHA256SUMS
-            release-assets/*.spdx.json
+          subject-path: qualified/*.tar.gz
+
+      - name: Create immutable release candidate
+        id: draft
+        shell: bash
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          set -euo pipefail
+          existing_ref=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" \
+            --jq '.object.sha' 2>/dev/null || true)
+          if [[ -n "$existing_ref" && "$existing_ref" != "$COMMIT" ]]; then
+            echo "$TAG already points to unqualified commit $existing_ref" >&2
+            exit 1
+          fi
+          if [[ -z "$existing_ref" ]]; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              --field ref="refs/tags/${TAG}" \
+              --field sha="$COMMIT" >/dev/null
+          fi
+
+          release_state=$(gh release view "$TAG" --json isDraft --jq \
+            'if .isDraft then "draft" else "published" end' 2>/dev/null || true)
+          if [[ -z "$release_state" ]]; then
+            gh release create "$TAG" \
+              --draft \
+              --generate-notes \
+              --target "$COMMIT" \
+              --title "$TAG"
+            release_state=draft
+          fi
+          if [[ "$release_state" == "draft" ]]; then
+            gh release upload "$TAG" --clobber \
+              qualified/*.tar.gz \
+              qualified/*.tar.gz.sha256 \
+              qualified/*.spdx.json \
+              qualified/SHA256SUMS \
+              qualified/release-manifest.json
+          fi
+          expected_assets=$(
+            {
+              jq --raw-output \
+                '.artifacts[] | .archive, (.archive + ".sha256"), .sbom' \
+                qualified/release-manifest.json
+              printf '%s\n' SHA256SUMS release-manifest.json
+            } | sort
+          )
+          actual_assets=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort)
+          if [[ "$actual_assets" != "$expected_assets" ]]; then
+            echo "$TAG asset set does not match release-manifest.json" >&2
+            diff <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$actual_assets") || true
+            exit 1
+          fi
+          echo "state=$release_state" >>"$GITHUB_OUTPUT"
+
+      - name: Dispatch approval and publication on the tag
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          gh workflow run publish-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$TAG" \
+            --field commit="$COMMIT"
