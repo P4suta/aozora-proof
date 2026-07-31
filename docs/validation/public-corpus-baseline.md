@@ -9,8 +9,11 @@ mirror at commit `b1ec9a7fa46de8dd5acc33378428c899e86bfb32`.
 | `.txt` files | 17,889 |
 | Source bytes | 845,727,350 |
 | Internal diagnostics | 0 |
-| Control characters | 89 findings in 12 files |
-| Half-width katakana | 25 findings in 19 files |
+| Tab characters | 88 findings in 11 files |
+| Form-feed characters | 1 finding in 1 file |
+| Other control characters | 0 |
+| Half-width katakana | 0 |
+| Half-width kana punctuation | 25 findings in 19 files |
 | Platform-dependent characters | 10 findings in 6 files |
 | Characters outside JIS X 0213 | 1 finding in 1 file |
 | Mixed line endings | 123 files |
@@ -33,6 +36,28 @@ The audit-only candidate rules produced:
 | Half-width space | 6,728 | 875 |
 | ASCII parenthesis | 1,685 | 215 |
 | Full-width tilde | 3,126 | 1,276 |
+
+The residual character findings are concentrated in a small set of code
+points:
+
+| Rule | Code point | Character | Findings |
+|---|---|---:|---:|
+| Half-width kana punctuation | U+FF61 | ｡ | 2 |
+| Half-width kana punctuation | U+FF62 | ｢ | 3 |
+| Half-width kana punctuation | U+FF63 | ｣ | 7 |
+| Half-width kana punctuation | U+FF64 | ､ | 7 |
+| Half-width kana punctuation | U+FF65 | ･ | 6 |
+| Platform-dependent | U+2160 | Ⅰ | 7 |
+| Platform-dependent | U+2179 | ⅹ | 1 |
+| Platform-dependent | U+5393 | 厓 | 1 |
+| Platform-dependent | U+8CF4 | 賴 | 1 |
+
+Released files are evidence for review, not automatic exceptions. Tabs occur
+mostly in alignment-like text, while the form feed acts as a page boundary.
+Their dedicated findings preserve that intent for a proofreader instead of
+suggesting an unsafe blanket deletion. The half-width punctuation and
+platform-dependent characters still violate the submission character set;
+each occurrence requires confirmation against the source book before editing.
 
 These candidates remain experimental. Their frequency and dependence on
 notation context make them unsuitable as default warnings without manual

@@ -90,13 +90,41 @@ const RULES: &[RuleDoc] = &[
         fix: "対応する全角カタカナに置き換えます。",
     },
     RuleDoc {
+        code: "aozora::char::halfwidth_kana_punctuation",
+        title: "半角カナ用約物",
+        rationale: "半角カナ領域の句読点、かぎ括弧、中点は本文に直接用いません。\
+                    対応する全角の和文記号で表記します。",
+        example_bad: "｢青空･文庫｣",
+        example_good: "「青空・文庫」",
+        fix: "底本の記号を確認し、対応する全角記号に置き換えます。",
+    },
+    RuleDoc {
         code: "aozora::char::control_character",
         title: "使用できない制御文字",
-        rationale: "タブ、NUL、DELなどの不可視制御文字は表示や行位置を不安定にし、本文へ\
+        rationale: "NUL、DELなどの不可視制御文字は表示や行位置を不安定にし、本文へ\
                     意図せず混入した可能性が高い文字です。",
-        example_bad: "語の途中にタブや NUL が入っている",
-        example_good: "必要な空白を青空文庫の規則に沿った文字で入力する",
+        example_bad: "語の途中に NUL や DEL が入っている",
+        example_good: "不可視制御文字を含まない本文",
         fix: "底本と前後の文字を確認し、不要な制御文字を削除します。",
+    },
+    RuleDoc {
+        code: "aozora::char::tab_character",
+        title: "本文中のタブ文字",
+        rationale: "タブ幅は環境によって変わるため、底本の字下げや表組みを再現する\
+                    提出形式として使えません。",
+        example_bad: "項目<TAB>説明",
+        example_good: "青空文庫注記または規定の文字で配置を表現する",
+        fix: "単純に削除せず底本の配置を確認し、字下げや表組みの青空文庫注記、\
+              または規定の文字表現に置き換えます。",
+    },
+    RuleDoc {
+        code: "aozora::char::form_feed_character",
+        title: "改ページ制御文字",
+        rationale: "フォームフィードは環境依存の不可視制御文字です。青空文庫形式では\
+                    改ページを注記で明示します。",
+        example_bad: "本文<FF>次ページ",
+        example_good: "本文［＃改ページ］次ページ",
+        fix: "底本の改ページ位置を確認し、［＃改ページ］など該当する注記に置き換えます。",
     },
     RuleDoc {
         code: "aozora::char::platform_dependent",
@@ -168,7 +196,10 @@ mod tests {
             "aozora::char::utf8_source",
             "aozora::char::invalid_encoding",
             "aozora::char::halfwidth_katakana",
+            "aozora::char::halfwidth_kana_punctuation",
             "aozora::char::control_character",
+            "aozora::char::tab_character",
+            "aozora::char::form_feed_character",
             "aozora::char::platform_dependent",
             "aozora::char::needs_gaiji_chuki",
             "aozora::char::not_in_jisx0213",

@@ -19,9 +19,9 @@ const CASES: &[(&str, &[u8], &str)] = &[
         "aozora::char::needs_gaiji_chuki",
     ),
     (
-        "control character",
+        "tab character",
         include_bytes!("fixtures/mutations/control-character.txt"),
-        "aozora::char::control_character",
+        "aozora::char::tab_character",
     ),
 ];
 

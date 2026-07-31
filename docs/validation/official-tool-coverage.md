@@ -13,7 +13,8 @@ Primary references:
 | Area | Existing workflow | aozora-proof status | Validation stance |
 |---|---|---|---|
 | JIS X 0208 / 機種依存文字 | 文字チェッカー、チェッカー君 | Implemented | Compare findings; do not copy implementation data |
-| 半角カタカナ | チェッカー君 | Implemented | Objective default rule |
+| 半角カナ領域 | チェッカー君 | Implemented; letters and punctuation reported separately | Objective default rule |
+| タブ・改ページ・その他の制御文字 | Checker tools and manual | Implemented as separate actionable findings | Do not silently delete layout intent |
 | 改行・保存形式 | Manual and editor settings | Implemented | Submission-only notes for UTF-8 and non-CRLF |
 | 旧字・新字 | 校閲君 | Implemented as Note | Requires confirmation against the source book |
 | 外字注記 | 外字注記辞書 and search tools | Lookup and suggestions implemented | Suggestions remain read-only |

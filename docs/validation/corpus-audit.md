@@ -9,8 +9,8 @@ just audit-corpus ../aozorabunko_text
 
 The command recursively checks `.txt` files and writes deterministic JSON to
 `target/corpus-audit.json`. The report contains aggregate counts, rule totals,
-affected-file totals, and a bounded set of relative sample paths. It contains
-no source excerpts and no timestamps.
+affected-file totals, code-point frequencies, and a bounded set of relative
+sample paths. It contains no source excerpts and no timestamps.
 
 Review disagreements with external checkers as one of:
 
