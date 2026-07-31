@@ -114,6 +114,19 @@ pub fn shinji_for(c: char) -> Option<char> {
         .map(|&(_, shinji)| shinji)
 }
 
+/// Recorded traditional forms for a modern-form character.
+///
+/// More than one traditional or variant form can map to the same modern
+/// character, so callers must present every returned candidate for review.
+#[must_use]
+pub fn kyuji_for(c: char) -> Vec<char> {
+    KYUJI_TO_SHINJI
+        .iter()
+        .filter(|&&(_, shinji)| shinji == c)
+        .filter_map(|&(kyuji, _)| char::from_u32(kyuji))
+        .collect()
+}
+
 /// A character's JIS X 0213 面区点 (plane-row-cell) position plus its 水準.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenKuTen {
@@ -214,6 +227,8 @@ mod tests {
         assert_eq!(shinji_for('\u{4F86}'), Some('\u{6765}')); // 來 → 来
         assert_eq!(shinji_for('\u{4ECF}'), None); // 仏 is already 新字体
         assert_eq!(shinji_for('あ'), None);
+        assert!(kyuji_for('\u{4ECF}').contains(&'\u{4F5B}')); // 仏 → 佛
+        assert!(kyuji_for('あ').is_empty());
     }
 
     #[test]

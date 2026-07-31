@@ -89,6 +89,9 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+rust-policy:
+    cargo run --locked -p xtask -- lint rust-policy
+
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
@@ -120,12 +123,28 @@ cov:
     @echo "cov: lcov.info + target/llvm-cov/html written"
 
 # everything CI's gating jobs run (test + lint + deny). Mirrors ci.yml.
-ci: fmt-check clippy test doc deny typos lint-toml lint-actions lint-web
+ci: fmt-check rust-policy clippy test doc deny typos lint-toml lint-actions lint-web
     @echo "ci: gating checks passed (use 'just ci-full' to also run the coverage job)"
 
 # full CI parity — also reproduces the coverage job (ci.yml `coverage`).
 ci-full: ci cov
     @echo "ci-full: all CI jobs reproduced locally"
+
+# Native release gate for the generated reference assets.
+ci-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    release_dir=$(mktemp -d)
+    release_target=${CARGO_TARGET_DIR:-target}
+    trap 'rm -rf "$release_dir"' EXIT
+    cargo build --locked --release -p aozora-proof-cli
+    "$release_target/release/aozora-proof" man > "$release_dir/aozora-proof.1"
+    for shell in bash zsh fish powershell elvish; do
+      "$release_target/release/aozora-proof" completions "$shell" > "$release_dir/aozora-proof.$shell"
+    done
+    test -s "$release_dir/aozora-proof.1"
+    "$release_target/release/aozora-proof" --version | grep -q '^aozora-proof 0\.2\.0 '
+    echo "ci-release: native binary, man page, and completions passed"
 
 # ---- web app ---------------------------------------------------------------
 

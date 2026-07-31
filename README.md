@@ -1,106 +1,158 @@
 # aozora-proof
 
-<p align="center">
-  <a href="https://github.com/P4suta/aozora-proof/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/P4suta/aozora-proof/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="./LICENSE-APACHE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue"></a>
-  <a href="./rust-toolchain.toml"><img alt="msrv" src="https://img.shields.io/badge/rust-1.95%2B-orange"></a>
-</p>
+`aozora-proof` is a submission-quality proofreader for
+[青空文庫](https://www.aozora.gr.jp/) text. Version 0.2 combines complete
+submission checks, deliberately narrow safe fixes, and interactive review in
+one deterministic CLI.
 
-A modern, FOSS proofreading toolkit for **青空文庫記法 (Aozora Bunko notation)**
-text — built to run locally, in **CI**, and in the browser as a static web app.
+The tool distinguishes three kinds of requirement:
 
-The project is currently an experimental validation tool. Its Rust crates are
-not published, and no compatibility promise is made for the internal API while
-the rules are measured against real works. The workspace crate split is not a
-plan to publish an `aozora-proof-*` package family.
+- **automatic** checks can be decided from the file, including Shift_JIS,
+  CRLF, BOM, character repertoire, control characters, external-character
+  annotations, notation structure, submission wrappers, and the final newline;
+- **review** findings present evidence and alternatives without deciding
+  orthography, OCR ambiguities, spacing, ruby grouping, `ケ`/`ヶ`, gaiji, or
+  bibliographical intent;
+- **manual** checks such as comparison with the base edition, semantic layout,
+  and rights decisions stay visible and are never reported as automatically
+  confirmed.
 
-`aozora-proof` checks the **character level** of a manuscript — the layer the
-[`aozora`](https://github.com/P4suta/aozora) parser deliberately leaves alone —
-and folds in the parser's notation diagnostics into one unified report:
+The [official checklist](https://www.aozora.gr.jp/KOSAKU/textfile_checklist/)
+and [proofreading manual](https://www.aozora.gr.jp/aozora-manual/index-proofreading.html)
+are mapped to the catalog exercised by `aozora-proof rules`.
 
-- **Character conformance** — flags characters that may not appear literally in
-  conformant text (outside JIS X 0208 / 機種依存文字 / half-width katakana) and
-  must instead be written as 外字注記; plus file-structure checks (BOM, line
-  endings, encoding).
-- **Old-/new-form kanji (旧字体↔新字体)** — detects kanji that have an
-  old/new-form counterpart and suggests the alternate for the editor to confirm.
-- **Gaiji (外字) lookup** — 注記 ⇔ character ⇔ JIS 面区点 ⇔ Unicode, both ways.
+## Install
 
-The notation level (ruby, bouten, 外字 resolution, bracket pairing, diagnostics)
-is handled by the `aozora` parser, which `aozora-proof` consumes rather than
-reimplements.
+Download the archive for your platform from
+[GitHub Releases](https://github.com/P4suta/aozora-proof/releases). Each archive
+includes the binary, manual page, shell completions, licenses, and its SHA-256
+file. Releases also publish an aggregate checksum, SBOM, and GitHub artifact
+attestation.
+
+The Rust workspace crates are private implementation modules and are not
+published to crates.io.
 
 ## Use
 
+Every document command requires an explicit character-form policy:
+
+- `modern` reviews traditional forms as modern-form candidates;
+- `traditional` reviews modern forms with all known traditional candidates;
+- `mixed` performs no directional orthography review.
+
 ```console
-$ aozora-proof check seihon.txt
-$ cat seihon.txt | aozora-proof check -
-$ aozora-proof check --format json *.txt          # machine-readable, for CI
-$ aozora-proof check --fail-on warning chapter*.txt
-$ aozora-proof check --diff old.txt                 # preview only; never writes
-$ aozora-proof check --watch draft.txt            # re-check on every save
-$ aozora-proof explain aozora::char::platform_dependent   # why a code fired
-$ aozora-proof completions zsh > ~/.zfunc/_aozora-proof   # shell completions
+$ aozora-proof check --orthography modern manuscript.txt
+$ aozora-proof check --orthography mixed src/ chapter.txt
+$ cat manuscript.txt | aozora-proof check --orthography mixed --format json -
+$ aozora-proof fix --orthography mixed --dry-run manuscript.txt
+$ aozora-proof fix --orthography mixed manuscript.txt
+$ aozora-proof review --orthography traditional manuscript.txt
+$ aozora-proof explain aozora::proof::encoding::line_ending
+$ aozora-proof gaiji lookup U+4FF1
+$ aozora-proof gaiji search 葛
+$ aozora-proof rules
+$ aozora-proof config show manuscript.txt
 ```
 
-Exit codes: `0` clean · `1` findings (`--strict`, or at/above `--fail-on`) ·
-`2` usage / IO error · `3` internal-source finding (a tool bug).
+`check` is always read-only. `fix` applies only `Safe` edits, validates all
+edits in memory, requires a lossless Shift_JIS result, and atomically replaces
+a file only if it has not changed since reading. `fix -n` prints a unified
+diff. With stdin, `fix` writes the corrected Shift_JIS document to stdout.
 
-## CI / pre-commit
+`review` requires a terminal and stages choices in memory. `y/n/q/a/d/g/j/k`,
+`/`, `p`, and `?` follow the familiar patch-review model; `Ctrl-S` shows the
+final diff, and only a second confirmation writes. `Esc` and `Ctrl-C` exit
+without changes.
 
-GitHub Action — runs the checks and uploads findings to the Security tab as SARIF:
+## Configuration
+
+Resolution order is command flag, `AOZORA_PROOF_*` environment variable,
+nearest `.aozora-proof.toml`, platform user configuration, then default. On
+Unix the user file is
+`$XDG_CONFIG_HOME/aozora-proof/config.toml`, falling back to
+`$HOME/.config/aozora-proof/config.toml`.
+
+```toml
+orthography = "mixed"
+fail-on = "error"
+format = "auto"
+color = "auto"
+lang = "en"
+include = ["**/*.txt"]
+exclude = ["vendor/**"]
+respect-ignore = true
+autofix = true
+
+[rules]
+"aozora::proof::layout::spacing" = "off"
+
+[[overrides]]
+path = "classics/**"
+orthography = "traditional"
+```
+
+`aozora-proof init` creates a project configuration interactively.
+`aozora-proof config schema` prints its JSON Schema. Unknown keys and rule
+codes are usage errors; rule codes include a closest-match suggestion.
+
+Directory traversal is recursive for `.txt` files, skips hidden paths and
+symlinked directories, and respects `.gitignore`, `.ignore`, and
+`.aozora-proofignore`. An explicitly named file is checked even when ignored.
+
+## Output and exits
+
+`--format auto` selects human output on a terminal and schema-v2 JSON when
+piped. Explicit formats are `human`, `json`, `short`, and `sarif`. JSON, short,
+and SARIF use canonical English and deterministic ordering; `--lang en|ja`
+changes human presentation only.
+
+Exit codes are `0` for success, `1` for findings at or above `--fail-on`, `2`
+for usage/input/configuration/write failures, and `3` for an internal
+invariant finding. SIGINT remains 130. A closed output pipe exits successfully.
+
+Machine JSON begins with `schemaVersion`, `tool`, `summary`, and `files`. Each
+file records encoding, line endings, conformance, review state, and findings
+with decoded UTF-8 byte spans, one-based Unicode code-point positions,
+canonical messages, authority URLs, structured data, and typed alternatives.
+
+## CI and pre-commit
+
+The composite action downloads the requested release archive, checks its
+SHA-256 digest, verifies its GitHub artifact attestation, runs the CLI, and can
+upload SARIF:
 
 ```yaml
-# .github/workflows/aozora-proof.yml
 permissions:
   contents: read
   security-events: write
-jobs:
-  proof:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: P4suta/aozora-proof/action@main
-        with:
-          files: "**/*.txt"
-          fail-on: error
+  attestations: read
+
+steps:
+  - uses: actions/checkout@v6
+  - uses: P4suta/aozora-proof/action@v0.2.0
+    with:
+      files: "**/*.txt"
+      orthography: mixed
+      fail-on: error
+      version: "0.2.0"
 ```
 
-pre-commit ([pre-commit.com](https://pre-commit.com)):
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/P4suta/aozora-proof
-    rev: main
-    hooks:
-      - id: aozora-proof
-```
-
-## Workspace
-
-| crate | role |
-|---|---|
-| `aozora-proof-core` | the engine — pure, `forbid(unsafe)`, WASM-clean; `&str` / `&[u8]` → findings |
-| `aozora-proof-data` | character-classification tables (JIS 水準, 機種依存文字, 旧字体, gaiji), baked at build time |
-| `aozora-proof-cli`  | the `aozora-proof` binary |
-| `aozora-proof-wasm` | wasm-bindgen façade powering the in-browser web app (`web/`) |
-| `xtask` | unpublished real-corpus audit command used during rule validation |
-
-A static **web app** (`web/`) runs the checks in the browser — paste text to see
-findings plus 外字 search — published to
-[GitHub Pages](https://p4suta.github.io/aozora-proof/).
+The repository also exposes an `aozora-proof` pre-commit hook with the
+non-directional `mixed` policy. It uses the release binary already on `PATH`
+and does not build the private crates.
 
 ## Develop
 
-`./bootstrap.sh` provisions the toolchain and dev tools; `just --list` shows
-every task. See [CONTRIBUTING](CONTRIBUTING.md) and [ARCHITECTURE](ARCHITECTURE.md).
+`./bootstrap.sh` provisions the pinned environment, `just --list` documents the
+development commands, and `just ci` is the pre-push gate. See
+[CONTRIBUTING](CONTRIBUTING.md), [architecture](ARCHITECTURE.md), and
+[ADR 0005](docs/adr/0005-submission-proofreading-cli.md).
 
-`just audit-corpus /path/to/corpus` writes a deterministic aggregate report
-under `target/`. It records counts and relative sample paths, never manuscript
-contents.
+The static [web app](https://p4suta.github.io/aozora-proof/) uses the same
+schema-v2 catalog through WebAssembly. Its editor workflow is intentionally
+unchanged in 0.2.
 
 ## License
 
 Apache-2.0 OR MIT, at your option. Vendored character data carries its own
-upstream licenses; see [`NOTICE`](NOTICE).
+upstream licenses; see [NOTICE](NOTICE).

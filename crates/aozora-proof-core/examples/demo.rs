@@ -6,13 +6,12 @@
 //! cargo run --example demo -- '※［＃「謎の字」、第3水準9-9-9］'
 //! ```
 
-fn main() {
+fn main() -> Result<(), String> {
     let text = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "※［＃「謎の字」、第3水準9-9-9］".to_owned());
-    let report = aozora_proof_core::run_all(text.as_bytes());
-    println!(
-        "{}",
-        aozora_proof_core::serialize_findings(&report.findings)
-    );
+    let report = aozora_proof_core::run_all(text.as_bytes()).map_err(|error| error.to_string())?;
+    let json = aozora_proof_core::serialize_report(&report).map_err(|error| error.to_string())?;
+    println!("{json}");
+    Ok(())
 }

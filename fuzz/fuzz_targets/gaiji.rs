@@ -9,11 +9,11 @@ use aozora_proof_core::gaiji_dict;
 
 fuzz_target!(|data: &[u8]| {
     if let [men, ku, ten, ..] = data {
-        let _ = gaiji_dict::from_men_ku_ten(*men, *ku, *ten);
+        std::hint::black_box(gaiji_dict::from_men_ku_ten(*men, *ku, *ten));
     }
     let text = String::from_utf8_lossy(data);
-    let _ = gaiji_dict::search(&text);
+    std::hint::black_box(gaiji_dict::search(&text));
     for c in text.chars().take(64) {
-        let _ = gaiji_dict::lookup(c);
+        std::hint::black_box(gaiji_dict::lookup(c));
     }
 });

@@ -25,6 +25,20 @@ test  = false
 doc   = false
 bench = false
 
+[[bin]]
+name  = "fix"
+path  = "fuzz_targets/fix.rs"
+test  = false
+doc   = false
+bench = false
+
+[[bin]]
+name  = "wire"
+path  = "fuzz_targets/wire.rs"
+test  = false
+doc   = false
+bench = false
+
 # Detach from the main workspace: cargo-fuzz targets need the nightly libFuzzer
 # runtime and must not be pulled into the stable `cargo build --workspace`.
 [workspace]

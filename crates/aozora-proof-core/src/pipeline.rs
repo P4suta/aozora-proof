@@ -1,193 +1,299 @@
-//! Orchestration — combine the notation layer (the `aozora` parser) with the
-//! character layers (conformance + 旧字体↔新字体 + 外字注記) into one [`Report`].
-//!
-//! [`run_all`] runs file-structure checks, the notation layer, the
-//! character-conformance and 旧字体↔新字体 layers, and finally a gaiji pass that
-//! attaches 外字注記 suggestions to the characters that need one — all over raw
-//! bytes.
+//! Pure orchestration over raw document bytes.
 
-use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
+use std::collections::BTreeMap;
 
-/// The full proofreading result for one document: every finding lifted into
-/// the unified DECODED coordinate frame.
+use crate::CheckError;
+use crate::finding::{
+    DetectionClass, Finding, FindingSource, FixOperation, Origin, RuleCategory, Severity, Span,
+};
+use crate::moji::file_checks::{DetectedEncoding, LineEnding, detect_encoding, detect_line_ending};
+use crate::orthography::Orthography;
+use crate::rules;
+
+/// Full result for one document.
 #[derive(Debug, Clone)]
 pub struct Report {
-    /// All findings, sorted by [`crate::Span::start`].
+    /// Findings sorted by span and code.
     pub findings: Vec<Finding>,
-    /// The decoded source text the findings index into (empty if the input
-    /// could not be decoded). Lets callers map byte spans to line/column.
+    /// Decoded text indexed by every finding.
     pub decoded: String,
+    /// Detected source encoding.
+    pub encoding: DetectedEncoding,
+    /// Detected line-ending convention.
+    pub line_ending: LineEnding,
+    /// Orthography policy used by the run.
+    pub orthography: Orthography,
 }
 
 impl Report {
-    /// Build a report from an unsorted finding set, sorting by span start.
+    fn new(
+        mut findings: Vec<Finding>,
+        decoded: String,
+        metadata: ReportMetadata,
+    ) -> Result<Self, CheckError> {
+        for finding in &findings {
+            validate_span(&decoded, finding.span)?;
+            for fix in &finding.fixes {
+                if let FixOperation::Text(edit) = &fix.operation {
+                    validate_span(&decoded, edit.span)?;
+                }
+            }
+        }
+        findings.sort_by_key(|finding| (finding.span.start, finding.span.end, finding.code));
+        Ok(Self {
+            findings,
+            decoded,
+            encoding: metadata.encoding,
+            line_ending: metadata.line_ending,
+            orthography: metadata.orthography,
+        })
+    }
+
+    /// Whether every automatically evaluated requirement conforms.
     #[must_use]
-    pub fn new(mut findings: Vec<Finding>, decoded: String) -> Self {
-        findings.sort_by_key(|f| (f.span.start, f.span.end));
-        Self { findings, decoded }
+    pub fn conformant(&self) -> bool {
+        !self.findings.iter().any(|finding| {
+            finding.detection == DetectionClass::Automatic
+                && matches!(finding.severity, Severity::Error | Severity::Warning)
+        })
+    }
+
+    /// Whether judgement-dependent work remains visible.
+    #[must_use]
+    pub fn review_pending(&self) -> bool {
+        self.findings
+            .iter()
+            .any(|finding| finding.detection == DetectionClass::Review)
+            || rules::official_items()
+                .iter()
+                .any(|item| item.detection == DetectionClass::Manual)
     }
 }
 
-/// Run the notation layer over already-decoded UTF-8 `text`, projecting each
-/// `aozora` diagnostic into a unified [`Finding`] in decoded coordinates.
+#[derive(Debug, Clone, Copy)]
+struct ReportMetadata {
+    encoding: DetectedEncoding,
+    line_ending: LineEnding,
+    orthography: Orthography,
+}
+
+/// Run the upstream notation parser over decoded text.
 ///
-/// [`run_all`] adds the character layers on top.
-#[must_use]
-pub fn run_notation(text: &str) -> Vec<Finding> {
-    let Ok(document) = aozora::parse(text) else {
-        return Vec::new();
-    };
+/// # Errors
+///
+/// Returns [`CheckError`] when the source exceeds the span model, parsing
+/// fails, or an upstream diagnostic contains an invalid span.
+pub fn run_notation(text: &str) -> Result<Vec<Finding>, CheckError> {
+    validate_source_size(text.len())?;
+    let document = aozora::parse(text).map_err(|source| CheckError::Parse { source })?;
     document
         .snapshot()
         .diagnostics()
         .iter()
-        .map(|d| Finding {
-            code: d.code(),
-            severity: severity_from(d.severity()),
-            origin: Origin::Notation,
-            source: source_from(d.source()),
-            span: d.span().into(),
-            message: d.to_string(),
-            codepoint: None,
-            suggestion: None,
+        .map(|diagnostic| {
+            let span = Span::from(diagnostic.span());
+            validate_span(text, span)?;
+            Ok(Finding {
+                code: diagnostic.code(),
+                category: RuleCategory::Notation,
+                detection: DetectionClass::Automatic,
+                severity: severity_from(diagnostic.severity()),
+                origin: Origin::Notation,
+                source: source_from(diagnostic.source()),
+                span,
+                message: diagnostic.to_string(),
+                message_ja: diagnostic.to_string(),
+                data: BTreeMap::new(),
+                authority_url: rules::upstream_rule().authority_url,
+                codepoint: None,
+                fixes: Vec::new(),
+            })
         })
         .collect()
 }
 
-/// Run the full proofreading pipeline over raw input bytes.
+/// Run non-submission checks without an orthography direction.
 ///
-/// File-structure checks run first; then, after decoding, the notation and
-/// character layers — all merged and sorted into one [`Report`] in decoded
-/// coordinates.
+/// # Errors
 ///
-/// If the bytes decode as neither UTF-8 nor `Shift_JIS`, only the file-structure
-/// findings plus an `invalid_encoding` error are returned (the text layers
-/// cannot run on undecodable input).
-#[must_use]
-pub fn run_all(raw: &[u8]) -> Report {
-    run(raw, false)
+/// Returns [`CheckError`] when decoding, parsing, rule lookup, or coordinate
+/// validation fails.
+pub fn run_all(raw: &[u8]) -> Result<Report, CheckError> {
+    run(raw, false, Orthography::Mixed)
 }
 
-/// Run the full pipeline plus 青空文庫 submission-format checks.
-#[must_use]
-pub fn run_submission(raw: &[u8]) -> Report {
-    run(raw, true)
+/// Run submission checks without an orthography direction.
+///
+/// Interactive and command-line callers should use
+/// [`run_submission_with_orthography`] after resolving the required policy.
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when decoding, parsing, rule lookup, or coordinate
+/// validation fails.
+pub fn run_submission(raw: &[u8]) -> Result<Report, CheckError> {
+    run(raw, true, Orthography::Mixed)
 }
 
-fn run(raw: &[u8], submission: bool) -> Report {
-    let mut findings = crate::moji::file_checks::check(raw);
+/// Run every submission check under an explicit orthography policy.
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when decoding, parsing, rule lookup, or coordinate
+/// validation fails.
+pub fn run_submission_with_orthography(
+    raw: &[u8],
+    orthography: Orthography,
+) -> Result<Report, CheckError> {
+    run(raw, true, orthography)
+}
+
+fn run(raw: &[u8], submission: bool, orthography: Orthography) -> Result<Report, CheckError> {
+    let encoding = detect_encoding(raw);
+    let line_ending = detect_line_ending(raw);
+    let decoded = aozora::decode_auto(raw)
+        .map_err(|source| CheckError::Decode { source })?
+        .into_owned();
+    validate_source_size(decoded.len())?;
+
+    let mut findings = crate::moji::file_checks::check(raw)?;
     if submission {
-        findings.extend(crate::moji::file_checks::check_submission(raw));
+        findings.extend(crate::moji::file_checks::check_submission(raw)?);
     }
-    let decoded = if let Ok(text) = aozora::decode_auto(raw) {
-        findings.extend(run_notation(&text));
-        findings.extend(crate::moji::check(&text));
-        findings.extend(crate::kyuji::check(&text));
-        // Gaiji layer: enrich (does not add) — attach a 外字注記 suggestion to
-        // the character findings that need one. Runs last so it only fills
-        // gaps left by the other layers' suggestions.
-        crate::gaiji_dict::annotate(&mut findings);
-        text.into_owned()
-    } else {
-        findings.push(Finding {
-            code: crate::moji::file_checks::codes::INVALID_ENCODING,
-            severity: Severity::Error,
-            origin: Origin::Character,
-            source: FindingSource::Source,
-            span: Span { start: 0, end: 0 },
-            message: "ファイルを UTF-8 でも Shift_JIS でもデコードできませんでした。".to_owned(),
-            codepoint: None,
-            suggestion: None,
-        });
-        String::new()
-    };
-    Report::new(findings, decoded)
+    findings.extend(run_notation(&decoded)?);
+    findings.extend(crate::moji::check(&decoded)?);
+    findings.extend(crate::review::check(&decoded)?);
+    findings.extend(crate::kyuji::check(&decoded, orthography)?);
+    if submission {
+        findings.extend(crate::submission::check(&decoded)?);
+    }
+    crate::gaiji_dict::annotate(&mut findings)?;
+
+    Report::new(
+        findings,
+        decoded,
+        ReportMetadata {
+            encoding,
+            line_ending,
+            orthography,
+        },
+    )
 }
 
-/// Map the parser's `#[non_exhaustive]` severity into our owned enum,
-/// defaulting unknown future variants to the visible `Warning`.
-const fn severity_from(s: aozora::Severity) -> Severity {
-    match s {
+fn validate_source_size(len: usize) -> Result<(), CheckError> {
+    if u32::try_from(len).is_err() {
+        return Err(CheckError::SourceTooLarge { len });
+    }
+    Ok(())
+}
+
+fn validate_span(text: &str, span: Span) -> Result<(), CheckError> {
+    let start = usize::try_from(span.start).map_err(|source| CheckError::CoordinateConversion {
+        byte: span.start,
+        source,
+    })?;
+    let end = usize::try_from(span.end).map_err(|source| CheckError::CoordinateConversion {
+        byte: span.end,
+        source,
+    })?;
+    if start > end
+        || end > text.len()
+        || !text.is_char_boundary(start)
+        || !text.is_char_boundary(end)
+    {
+        return Err(CheckError::InvalidSpan {
+            start: span.start,
+            end: span.end,
+            source_len: text.len(),
+        });
+    }
+    Ok(())
+}
+
+const fn severity_from(severity: aozora::Severity) -> Severity {
+    match severity {
         aozora::Severity::Error => Severity::Error,
         aozora::Severity::Note => Severity::Note,
-        // `Warning`, plus any future `#[non_exhaustive]` variant, surfaces
-        // as the visible `Warning`.
         _ => Severity::Warning,
     }
 }
 
-/// Map the parser's `#[non_exhaustive]` diagnostic source into our owned
-/// enum, defaulting unknown future variants to `Source`.
-const fn source_from(s: aozora::DiagnosticSource) -> FindingSource {
-    match s {
+const fn source_from(source: aozora::DiagnosticSource) -> FindingSource {
+    match source {
         aozora::DiagnosticSource::Internal => FindingSource::Internal,
-        // `Source`, plus any future `#[non_exhaustive]` variant, is treated
-        // as a user-source issue.
         _ => FindingSource::Source,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::finding::FindingDetails;
+    use crate::rules::codes;
+
     use super::*;
 
     #[test]
-    fn run_all_clean_utf8_is_empty() {
+    fn orthography_is_explicit_and_findings_are_stably_sorted() {
+        let report = run_submission_with_orthography("來\n".as_bytes(), Orthography::Modern)
+            .expect("valid report");
+        assert_eq!(report.orthography, Orthography::Modern);
         assert!(
-            run_all("青空文庫のふつうの文章。".as_bytes())
+            report
                 .findings
-                .is_empty()
+                .iter()
+                .any(|finding| finding.code == codes::MODERN_CANDIDATE)
         );
-    }
-
-    #[test]
-    fn run_all_flags_a_character_issue() {
-        let report = run_all("\u{2460}".as_bytes()); // ①
-        assert!(report.findings.iter().any(|f| {
-            matches!(f.origin, Origin::Character)
-                && f.code == crate::moji::codes::PLATFORM_DEPENDENT
+        assert!(report.findings.windows(2).all(|pair| {
+            (pair[0].span.start, pair[0].span.end, pair[0].code)
+                <= (pair[1].span.start, pair[1].span.end, pair[1].code)
         }));
     }
 
     #[test]
-    fn run_all_merges_all_layers_sorted() {
-        // run_all must be the union of every layer (file-structure + notation
-        // + character) in one sorted report — verified by count so it does not
-        // depend on which specific diagnostics the parser emits for an input.
-        let raw = "①俱｜青《》".as_bytes();
-        let text = std::str::from_utf8(raw).unwrap();
-        let expected = crate::moji::file_checks::check(raw).len()
-            + run_notation(text).len()
-            + crate::moji::check(text).len()
-            + crate::kyuji::check(text).len();
-        let report = run_all(raw);
-        assert_eq!(
-            report.findings.len(),
-            expected,
-            "run_all must merge every layer"
-        );
-        // The character layer definitely contributed (① 機種依存, 俱 第3水準).
-        assert!(
-            report
-                .findings
-                .iter()
-                .any(|f| matches!(f.origin, Origin::Character))
-        );
-        let mut last = 0u32;
-        for f in &report.findings {
-            assert!(f.span.start >= last, "findings not sorted by span start");
-            last = f.span.start;
-        }
+    fn invalid_encoding_is_a_decode_error() {
+        assert!(matches!(
+            run_all(&[0xFF, 0xFF, 0xFF]),
+            Err(CheckError::Decode { .. })
+        ));
     }
 
     #[test]
-    fn run_all_reports_invalid_encoding() {
-        let report = run_all(&[0xFF, 0xFF, 0xFF]);
-        assert!(
-            report
-                .findings
-                .iter()
-                .any(|f| f.code == crate::moji::file_checks::codes::INVALID_ENCODING)
+    fn source_size_is_rejected_without_allocating_the_source() {
+        let oversized = usize::try_from(u32::MAX)
+            .expect("u32 fits usize")
+            .checked_add(1)
+            .expect("usize has room above u32");
+        assert!(matches!(
+            validate_source_size(oversized),
+            Err(CheckError::SourceTooLarge { len }) if len == oversized
+        ));
+    }
+
+    #[test]
+    fn unknown_rule_is_not_treated_as_upstream() {
+        let result = Finding::from_rule(
+            "aozora::proof::unknown",
+            Origin::Character,
+            Span { start: 0, end: 0 },
+            FindingDetails::new(String::new(), String::new()),
         );
+        assert!(matches!(
+            result,
+            Err(CheckError::UnknownRule {
+                code: "aozora::proof::unknown"
+            })
+        ));
+    }
+
+    #[test]
+    fn span_overflow_is_explicit() {
+        let oversized = usize::try_from(u32::MAX)
+            .expect("u32 fits usize")
+            .checked_add(1)
+            .expect("usize has room above u32");
+        assert!(matches!(
+            Span::try_from_usize(0, oversized),
+            Err(CheckError::SpanOverflow { .. })
+        ));
     }
 }

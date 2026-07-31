@@ -1,17 +1,15 @@
 # aozora-proof-wasm
 
-The WASM façade over [`aozora-proof-core`](../aozora-proof-core), for the static
-web app.
+Private WebAssembly façade over `aozora-proof-core` for the static web app.
 
-Build the browser package (writes to `web/pkg/`, where the `web/` app loads it):
+`checkJson(text)` returns the same schema-v2 report as the CLI under the
+non-directional `mixed` policy. `ruleTitlesJson()` and `ruleCatalogJson()`
+expose localized catalog presentation, while `gaijiSearchJson(query)` and
+`schemaVersion()` provide the existing reference APIs.
 
 ```console
 $ just wasm
-# equivalently:
-$ wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/pkg
 ```
 
-Exports: `checkJson(text)` (the `{schema_version,data}` findings envelope),
-`gaijiSearchJson(query)`, and `schemaVersion()`. On non-wasm targets these
-compile as plain Rust functions (the wasm-bindgen dependency is wasm32-only),
-so the crate stays part of the host workspace build.
+The generated package is written to `web/src/lib/pkg`. This crate is not
+published to crates.io.

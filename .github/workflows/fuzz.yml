@@ -19,9 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [run_all, gaiji]
+        target: [run_all, gaiji, fix, wire]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
       # cargo-fuzz / libFuzzer need nightly; the `fuzz/` crate is detached from
       # the pinned-stable workspace, so this toolchain is local to this job.
       - uses: dtolnay/rust-toolchain@nightly

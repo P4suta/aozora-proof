@@ -1,50 +1,25 @@
-//! The unified finding model and its JSON wire projection.
-//!
-//! # Wire format
-//!
-//! Findings serialise to the same `{ "schema_version", "data" }` envelope
-//! shape the `aozora` parser uses, and each entry is a **strict superset**
-//! of `aozora`'s diagnostic wire shape (`kind` / `severity` / `source` /
-//! `span`). A tool that already reads `aozora` wire therefore reads the
-//! notation subset of our output unchanged; the extra fields (`code`,
-//! `origin`, `suggestion`) are additive.
-//!
-//! [`SCHEMA_VERSION`] is owned by this crate (the proofreader's wire is a
-//! superset, so it versions independently of the parser's schema).
-//!
-//! # Code namespaces
-//!
-//! Character-level findings carry stable, namespaced codes that parallel
-//! `aozora`'s `aozora::lex::*`:
-//!
-//! - `aozora::char::*`  — character conformance (JIS, 機種依存, width, file)
-//! - `aozora::kyuji::*` — old-/new-form kanji (旧字体↔新字体)
-//! - `aozora::gaiji::*` — gaiji (外字) lookup surface
-//!
-//! Notation findings reuse the parser's own `aozora::lex::*` codes verbatim.
+//! Finding, coordinate, and structured-fix types shared by every frontend.
 
-use serde::Serialize;
+use std::collections::BTreeMap;
 
-/// Wire-format schema version for the proofreader's `Report` envelope.
-/// Bumped on any breaking change to the serialised shape.
-pub const SCHEMA_VERSION: u32 = 1;
+use crate::CheckError;
 
-/// Severity of a [`Finding`].
-///
-/// Mirrors `aozora::Severity` but is owned here so the public API does not
-/// leak the parser's `#[non_exhaustive]` enum into our surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Machine-report schema version.
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// Finding severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
-    /// A genuine defect; fails CI under `--fail-on error`.
+    /// A submission defect that can fail the configured gate.
     Error,
-    /// A recoverable issue the author should see.
+    /// A likely problem that should be resolved or explicitly retained.
     Warning,
-    /// Informational; never affects CI status on its own.
+    /// Advisory information.
     Note,
 }
 
 impl Severity {
-    /// Stable lowercase wire identifier (`"error"` / `"warning"` / `"note"`).
+    /// Canonical machine identifier.
     #[must_use]
     pub const fn as_wire_str(self) -> &'static str {
         match self {
@@ -55,48 +30,107 @@ impl Severity {
     }
 }
 
-/// Which sub-tool produced a [`Finding`] — used to group output by tab and
-/// to route per-tool CLI subcommands.
+/// Stable rule category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RuleCategory {
+    /// File encoding, byte order marks, and line endings.
+    Encoding,
+    /// Character repertoire and control characters.
+    Character,
+    /// Aozora notation structure.
+    Notation,
+    /// Modern and traditional character-form policy.
+    Orthography,
+    /// Ruby boundaries and grouping.
+    Ruby,
+    /// Spacing, punctuation, and source layout.
+    Layout,
+    /// Opening legend and closing bibliography.
+    Bibliography,
+    /// Checks that require the base edition or editorial judgement.
+    Manual,
+}
+
+impl RuleCategory {
+    /// Canonical machine identifier.
+    #[must_use]
+    pub const fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::Encoding => "encoding",
+            Self::Character => "character",
+            Self::Notation => "notation",
+            Self::Orthography => "orthography",
+            Self::Ruby => "ruby",
+            Self::Layout => "layout",
+            Self::Bibliography => "bibliography",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+/// How a rule can be evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectionClass {
+    /// The engine can determine the result without editorial judgement.
+    Automatic,
+    /// The engine can identify a candidate but a person decides it.
+    Review,
+    /// The requirement cannot be established from the text alone.
+    Manual,
+}
+
+impl DetectionClass {
+    /// Canonical machine identifier.
+    #[must_use]
+    pub const fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Review => "review",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+/// Which engine layer produced a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
-    /// From the `aozora` parser's notation diagnostics.
+    /// An upstream parser diagnostic.
     Notation,
-    /// Character-level conformance (JIS / 機種依存 / width / file).
+    /// Character or file conformance.
     Character,
-    /// Old-/new-form kanji (旧字体↔新字体).
-    Kyuji,
-    /// Gaiji (外字) lookup surface.
+    /// Orthography policy.
+    Orthography,
+    /// Gaiji reference policy.
     Gaiji,
+    /// Submission structure.
+    Submission,
 }
 
 impl Origin {
-    /// Stable lowercase wire identifier.
+    /// Canonical machine identifier.
     #[must_use]
     pub const fn as_wire_str(self) -> &'static str {
         match self {
             Self::Notation => "notation",
             Self::Character => "character",
-            Self::Kyuji => "kyuji",
+            Self::Orthography => "orthography",
             Self::Gaiji => "gaiji",
+            Self::Submission => "submission",
         }
     }
 }
 
-/// Whether a [`Finding`] traces to user input or to a library-internal bug.
-///
-/// Mirrors `aozora::DiagnosticSource`. An `Internal` finding maps to CLI
-/// exit code `3` — "the tool is wrong", as distinct from "the file is
-/// wrong" (exit `1`).
+/// Whether a finding traces to source text or an engine invariant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingSource {
-    /// Traces to the user-provided source text.
+    /// The input document.
     Source,
-    /// A pipeline-internal invariant violation (a bug to report upstream).
+    /// An invariant violation in the tool.
     Internal,
 }
 
 impl FindingSource {
-    /// Stable lowercase wire identifier (`"source"` / `"internal"`).
+    /// Canonical machine identifier.
     #[must_use]
     pub const fn as_wire_str(self) -> &'static str {
         match self {
@@ -106,148 +140,327 @@ impl FindingSource {
     }
 }
 
-/// A byte span in the unified DECODED coordinate frame. Matches `aozora`'s
-/// `Span` shape on the wire (`{ start, end }`, `u32`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Half-open UTF-8 byte range in the decoded source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Span {
-    /// Start byte offset (inclusive).
+    /// Inclusive start.
     pub start: u32,
-    /// End byte offset (exclusive).
+    /// Exclusive end.
     pub end: u32,
 }
 
 impl From<aozora::Span> for Span {
-    fn from(s: aozora::Span) -> Self {
+    fn from(value: aozora::Span) -> Self {
         Self {
-            start: s.start,
-            end: s.end,
+            start: value.start,
+            end: value.end,
         }
     }
 }
 
-/// A suggested fix: an 旧字体/新字体 replacement, or an "insert this 外字注記"
-/// autofix for a character that needs one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Suggestion {
-    /// Replacement text to substitute over [`Self::span`].
-    pub replacement: String,
-    /// The exact decoded range the replacement applies to.
-    pub span: Span,
-    /// Human-readable label, e.g. `旧字体「廣」→ 新字体「広」`.
-    pub label: String,
+impl Span {
+    /// Convert decoded byte offsets without truncation or clamping.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::SpanOverflow`] when either endpoint cannot be
+    /// represented by the wire-format coordinate type.
+    pub fn try_from_usize(start: usize, end: usize) -> Result<Self, CheckError> {
+        let start_u32 = u32::try_from(start).map_err(|source| CheckError::SpanOverflow {
+            start,
+            end,
+            source,
+        })?;
+        let end_u32 =
+            u32::try_from(end).map_err(|source| CheckError::SpanOverflow { start, end, source })?;
+        Ok(Self {
+            start: start_u32,
+            end: end_u32,
+        })
+    }
 }
 
-/// A single proofreading finding, in the unified DECODED coordinate frame.
+/// One-based Unicode code-point position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    /// One-based line.
+    pub line: usize,
+    /// One-based column measured in Unicode code points.
+    pub column: usize,
+}
+
+/// Whether an offered fix may be applied unattended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixApplicability {
+    /// One meaning-independent replacement is known.
+    Safe,
+    /// A person must inspect the source and choose.
+    Review,
+}
+
+impl FixApplicability {
+    /// Canonical machine identifier.
+    #[must_use]
+    pub const fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::Safe => "safe",
+            Self::Review => "review",
+        }
+    }
+}
+
+/// A decoded-source text replacement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEdit {
+    /// Range to replace.
+    pub span: Span,
+    /// Replacement text.
+    pub replacement: String,
+}
+
+/// A transformation represented by a fix alternative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FixOperation {
+    /// Replace decoded source text.
+    Text(TextEdit),
+    /// Remove a leading byte-order mark.
+    RemoveBom,
+    /// Convert every line ending to CRLF.
+    NormalizeCrLf,
+    /// Add the required final line ending.
+    EnsureFinalNewline,
+    /// Encode the final document as Shift_JIS.
+    EncodeShiftJis,
+}
+
+impl FixOperation {
+    /// Canonical machine identifier.
+    #[must_use]
+    pub const fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Text(_) => "replaceText",
+            Self::RemoveBom => "removeBom",
+            Self::NormalizeCrLf => "normalizeCrLf",
+            Self::EnsureFinalNewline => "ensureFinalNewline",
+            Self::EncodeShiftJis => "encodeShiftJis",
+        }
+    }
+}
+
+/// One possible correction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixAlternative {
+    /// Applicability classification.
+    pub applicability: FixApplicability,
+    /// Canonical English label.
+    pub label: String,
+    /// Japanese human-interface label.
+    pub label_ja: String,
+    /// Transformation to stage.
+    pub operation: FixOperation,
+}
+
+impl FixAlternative {
+    /// Construct a safe text replacement.
+    #[must_use]
+    pub const fn safe_text(
+        span: Span,
+        replacement: String,
+        label: String,
+        label_ja: String,
+    ) -> Self {
+        Self {
+            applicability: FixApplicability::Safe,
+            label,
+            label_ja,
+            operation: FixOperation::Text(TextEdit { span, replacement }),
+        }
+    }
+
+    /// Construct a review-only text replacement.
+    #[must_use]
+    pub const fn review_text(
+        span: Span,
+        replacement: String,
+        label: String,
+        label_ja: String,
+    ) -> Self {
+        Self {
+            applicability: FixApplicability::Review,
+            label,
+            label_ja,
+            operation: FixOperation::Text(TextEdit { span, replacement }),
+        }
+    }
+}
+
+/// Dynamic fields used to construct a catalog-backed finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingDetails {
+    message: String,
+    message_ja: String,
+    data: BTreeMap<String, String>,
+    codepoint: Option<char>,
+    fixes: Vec<FixAlternative>,
+}
+
+impl FindingDetails {
+    /// Construct localized messages with no additional context or fixes.
+    #[must_use]
+    pub const fn new(message: String, message_ja: String) -> Self {
+        Self {
+            message,
+            message_ja,
+            data: BTreeMap::new(),
+            codepoint: None,
+            fixes: Vec::new(),
+        }
+    }
+
+    /// Attach stable structured context.
+    #[must_use]
+    pub fn with_data(mut self, data: BTreeMap<String, String>) -> Self {
+        self.data = data;
+        self
+    }
+
+    /// Attach the offending scalar.
+    #[must_use]
+    pub const fn with_codepoint(mut self, codepoint: char) -> Self {
+        self.codepoint = Some(codepoint);
+        self
+    }
+
+    /// Attach correction alternatives.
+    #[must_use]
+    pub fn with_fixes(mut self, fixes: Vec<FixAlternative>) -> Self {
+        self.fixes = fixes;
+        self
+    }
+}
+
+/// A single proofreading result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
-    /// Stable, namespaced code (e.g. `aozora::char::needs_gaiji_chuki`, or
-    /// a reused `aozora::lex::*` code for notation findings).
+    /// Stable rule code.
     pub code: &'static str,
-    /// Severity.
+    /// Catalog category.
+    pub category: RuleCategory,
+    /// Catalog detection class.
+    pub detection: DetectionClass,
+    /// Severity after configuration.
     pub severity: Severity,
-    /// Producing sub-tool.
+    /// Producing engine layer.
     pub origin: Origin,
-    /// User-input vs library-internal.
+    /// Source or internal invariant.
     pub source: FindingSource,
-    /// Location, decoded-string byte offsets.
+    /// Decoded UTF-8 byte range.
     pub span: Span,
-    /// Human-readable message (Japanese).
+    /// Canonical English message.
     pub message: String,
-    /// The offending character, where the finding is about one char.
+    /// Japanese human-interface message.
+    pub message_ja: String,
+    /// Stable structured context.
+    pub data: BTreeMap<String, String>,
+    /// Official or upstream authority.
+    pub authority_url: &'static str,
+    /// Offending scalar when the rule is character-based.
     pub codepoint: Option<char>,
-    /// A suggested fix, where one exists.
-    pub suggestion: Option<Suggestion>,
+    /// Available corrections.
+    pub fixes: Vec<FixAlternative>,
 }
 
 impl Finding {
-    /// The wire `kind`: the trailing token of [`Self::code`] after the last
-    /// `::`. Matches `aozora`'s convention of emitting the short tag in the
-    /// `kind` field while the fully-qualified code travels in `code`.
+    /// Construct a proofreader-owned finding from catalog metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::UnknownRule`] when `code` is absent from the
+    /// proofreader-owned catalog.
+    pub fn from_rule(
+        code: &'static str,
+        origin: Origin,
+        span: Span,
+        details: FindingDetails,
+    ) -> Result<Self, CheckError> {
+        let rule = crate::rules::explain(code).ok_or(CheckError::UnknownRule { code })?;
+        Ok(Self {
+            code,
+            category: rule.category,
+            detection: rule.detection,
+            severity: rule.default_severity,
+            origin,
+            source: FindingSource::Source,
+            span,
+            message: details.message,
+            message_ja: details.message_ja,
+            data: details.data,
+            authority_url: rule.authority_url,
+            codepoint: details.codepoint,
+            fixes: details.fixes,
+        })
+    }
+
+    /// Trailing code token used by SARIF rule names.
     #[must_use]
     pub fn kind(&self) -> &str {
-        self.code.rsplit("::").next().unwrap_or(self.code)
+        self.code.rsplit("::").next().map_or(self.code, |kind| kind)
     }
-}
 
-#[derive(Serialize)]
-struct SpanWire {
-    start: u32,
-    end: u32,
-}
-
-impl From<Span> for SpanWire {
-    fn from(s: Span) -> Self {
-        Self {
-            start: s.start,
-            end: s.end,
+    /// Localized message for a human renderer.
+    #[must_use]
+    pub fn localized_message(&self, japanese: bool) -> &str {
+        if japanese {
+            &self.message_ja
+        } else {
+            &self.message
         }
     }
+
+    /// One-based position for this finding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError`] when the finding span is invalid for `decoded`.
+    pub fn position(&self, decoded: &str) -> Result<Position, CheckError> {
+        position(decoded, self.span.start)
+    }
 }
 
-#[derive(Serialize)]
-struct SuggestionWire<'a> {
-    replacement: &'a str,
-    span: SpanWire,
-    label: &'a str,
-}
-
-#[derive(Serialize)]
-struct FindingWire<'a> {
-    code: &'a str,
-    kind: &'a str,
-    severity: &'a str,
-    origin: &'a str,
-    source: &'a str,
-    span: SpanWire,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    codepoint: Option<char>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    suggestion: Option<SuggestionWire<'a>>,
-}
-
-impl<'a> From<&'a Finding> for FindingWire<'a> {
-    fn from(f: &'a Finding) -> Self {
-        Self {
-            code: f.code,
-            kind: f.kind(),
-            severity: f.severity.as_wire_str(),
-            origin: f.origin.as_wire_str(),
-            source: f.source.as_wire_str(),
-            span: f.span.into(),
-            codepoint: f.codepoint,
-            suggestion: f.suggestion.as_ref().map(|s| SuggestionWire {
-                replacement: &s.replacement,
-                span: s.span.into(),
-                label: &s.label,
-            }),
+/// Convert a decoded UTF-8 byte offset to a one-based Unicode position.
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when the offset is outside `text`, is not a UTF-8
+/// boundary, or coordinate counting overflows.
+pub fn position(text: &str, byte: u32) -> Result<Position, CheckError> {
+    let limit = usize::try_from(byte)
+        .map_err(|source| CheckError::CoordinateConversion { byte, source })?;
+    if limit > text.len() || !text.is_char_boundary(limit) {
+        return Err(CheckError::InvalidSpan {
+            start: byte,
+            end: byte,
+            source_len: text.len(),
+        });
+    }
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for (offset, character) in text.char_indices() {
+        if offset >= limit {
+            break;
+        }
+        if character == '\n' {
+            line = line.checked_add(1).ok_or(CheckError::CoordinateOverflow {
+                operation: "counting source lines",
+            })?;
+            column = 1;
+        } else {
+            column = column
+                .checked_add(1)
+                .ok_or(CheckError::CoordinateOverflow {
+                    operation: "counting source columns",
+                })?;
         }
     }
-}
-
-/// A [`Finding`] serialises directly to its wire shape (a superset of
-/// `aozora`'s diagnostic wire entry), so callers can embed it in their own
-/// envelopes (e.g. a per-file `{ path, data }`).
-impl Serialize for Finding {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        FindingWire::from(self).serialize(serializer)
-    }
-}
-
-#[derive(Serialize)]
-struct Envelope<'a> {
-    schema_version: u32,
-    data: Vec<FindingWire<'a>>,
-}
-
-/// Project a slice of [`Finding`] into the `{ schema_version, data }` JSON
-/// envelope. Empty input yields `{"schema_version":1,"data":[]}`.
-#[must_use]
-pub fn serialize_findings(findings: &[Finding]) -> String {
-    let data = findings.iter().map(FindingWire::from).collect();
-    let envelope = Envelope {
-        schema_version: SCHEMA_VERSION,
-        data,
-    };
-    serde_json::to_string(&envelope)
-        .unwrap_or_else(|_| String::from(r#"{"schema_version":1,"data":[]}"#))
+    Ok(Position { line, column })
 }

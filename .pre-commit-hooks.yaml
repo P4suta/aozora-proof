@@ -1,6 +1,6 @@
 - id: aozora-proof
-  name: aozora-proof (青空文庫記法 character check)
-  description: Check 青空文庫記法 text files for character-level conformance.
-  entry: aozora-proof check --format short --fail-on error
-  language: rust
+  name: aozora-proof (青空文庫 submission check)
+  description: Check 青空文庫 text against the complete submission rule catalog.
+  entry: aozora-proof check --orthography mixed --no-input --format short --fail-on error
+  language: system
   files: \.txt$

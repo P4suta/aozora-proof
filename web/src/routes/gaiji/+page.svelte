@@ -4,16 +4,27 @@
 
 	let query = $state('');
 	let ready = $state(false);
+	let initializationError = $state<string>();
 
-	const matches = $derived.by(() => {
+	const searchState = $derived.by(() => {
+		if (initializationError) {
+			return { status: 'error' as const, message: initializationError };
+		}
 		const q = query.trim();
-		if (!ready || !q) return [];
-		return searchGaiji(q).slice(0, 60);
+		if (!ready || !q) return { status: 'loading' as const };
+		return searchGaiji(q);
 	});
+	const matches = $derived(
+		searchState.status === 'ready' ? searchState.matches.slice(0, 60) : []
+	);
 
 	onMount(async () => {
-		await ensureReady();
-		ready = true;
+		try {
+			await ensureReady();
+			ready = true;
+		} catch (error) {
+			initializationError = error instanceof Error ? error.message : String(error);
+		}
 	});
 </script>
 
@@ -35,7 +46,11 @@
 	/>
 
 	<ul class="mt-4">
-		{#if query.trim() && matches.length === 0}
+		{#if searchState.status === 'error'}
+			<li class="py-2 text-error">外字検索に失敗しました: {searchState.message}</li>
+		{:else if query.trim() && searchState.status === 'loading'}
+			<li class="py-2 text-muted">外字辞書を読み込んでいます…</li>
+		{:else if query.trim() && matches.length === 0}
 			<li class="py-2 text-muted">該当なし</li>
 		{:else}
 			{#each matches as m, i (i)}

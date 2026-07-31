@@ -1,26 +1,20 @@
 # aozora-proof-cli
 
-The `aozora-proof` command-line proofreader for 青空文庫 text.
+Private implementation crate for the `aozora-proof` 0.2 binary. It provides
+submission `check`, safe `fix`, interactive `review`, reference commands,
+schema-v2 JSON and SARIF, deterministic discovery, layered configuration, and
+generated man/completion output.
 
 ```console
-$ aozora-proof check seihon.txt
-$ cat seihon.txt | aozora-proof check -
-$ aozora-proof check --format json *.txt          # machine-readable, for CI
-$ aozora-proof check --fail-on warning chapter*.txt
+$ aozora-proof check --orthography mixed manuscript.txt
+$ aozora-proof fix --orthography mixed --dry-run manuscript.txt
+$ aozora-proof review --orthography traditional manuscript.txt
+$ aozora-proof rules
 ```
 
-Runs the [`aozora`](https://github.com/P4suta/aozora) parser's notation
-diagnostics plus the character-level checks (JIS X 0208 conformance,
-機種依存文字, BOM / line endings) and merges them into one report.
+Exit codes are `0` success, `1` configured finding threshold reached, `2`
+usage/I/O/decode/configuration/write failure, and `3` internal invariant
+failure. A closed output pipe is success.
 
-## Exit codes
-
-| code | meaning |
-|---|---|
-| `0` | clean (or findings below `--fail-on`) |
-| `1` | `--strict` set with any finding, or a finding at/above `--fail-on` |
-| `2` | usage / input error (bad arguments, unreadable file) |
-| `3` | an internal-source finding fired (a tool bug — report upstream) |
-
-`--format auto` (default) prints human-readable output on a terminal and the
-JSON envelope when piped.
+This crate is not a supported Rust API and is not published to crates.io. See
+the [repository README](../../README.md) for the supported binary interface.

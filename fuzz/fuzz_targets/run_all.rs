@@ -6,5 +6,7 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = aozora_proof_core::run_all(data);
+    match std::hint::black_box(aozora_proof_core::run_all(data)) {
+        Ok(_) | Err(_) => {}
+    }
 });

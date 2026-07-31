@@ -1,237 +1,396 @@
-//! Character-level conformance checks.
-//!
-//! Walks decoded text and flags any character that may not appear literally
-//! in conformant 青空文庫 text. A single priority cascade classifies each
-//! character once (so e.g. `①` is reported as 機種依存, not also as 第3水準),
-//! emitting `aozora::char::*` findings in decoded byte coordinates:
-//!
-//! 1. controls — tabs and form feeds receive actionable codes;
-//! 2. half-width kana letters and punctuation (JIS X 0201);
-//! 3. 機種依存文字 (CP932 ∖ JIS X 0208);
-//! 4. 第3/第4水準 and characters outside JIS X 0213.
-//!
-//! ASCII is intentionally not flagged here (half/full-width handling is a
-//! separate concern). File-structure checks (BOM, line endings, encoding)
-//! live in [`file_checks`].
+//! Character repertoire and canonical-token checks.
 
 pub mod file_checks;
 
+use std::collections::BTreeMap;
+
 use aozora_proof_data::{Suijun, is_platform_dependent, jis_level};
 
-use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
+use crate::CheckError;
+use crate::finding::{Finding, FindingDetails, FixAlternative, Origin, Span};
+use crate::rules::codes;
 
-/// Stable finding codes for the character checker.
-pub mod codes {
-    /// Half-width katakana (JIS X 0201) used where full-width is required.
-    pub const HALFWIDTH_KATAKANA: &str = "aozora::char::halfwidth_katakana";
-    /// Half-width punctuation from the JIS X 0201 kana block.
-    pub const HALFWIDTH_KANA_PUNCTUATION: &str = "aozora::char::halfwidth_kana_punctuation";
-    /// 機種依存文字 — encodable in CP932 but outside JIS X 0208.
-    pub const PLATFORM_DEPENDENT: &str = "aozora::char::platform_dependent";
-    /// JIS X 0213 第3/第4水準 — representable only via 外字注記.
-    pub const NEEDS_GAIJI_CHUKI: &str = "aozora::char::needs_gaiji_chuki";
-    /// Outside JIS X 0213 entirely.
-    pub const NOT_IN_JISX0213: &str = "aozora::char::not_in_jisx0213";
-    /// A forbidden C0/DEL control character.
-    pub const CONTROL_CHARACTER: &str = "aozora::char::control_character";
-    /// A literal tab character.
-    pub const TAB_CHARACTER: &str = "aozora::char::tab_character";
-    /// A literal form-feed character.
-    pub const FORM_FEED_CHARACTER: &str = "aozora::char::form_feed_character";
-}
-
-/// The single classification a non-conformant character receives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CharIssue {
-    HalfwidthKatakana,
-    HalfwidthKanaPunctuation,
+enum CharacterIssue {
     PlatformDependent,
-    NeedsGaijiChuki,
-    NotInJisX0213,
-    ControlCharacter,
-    TabCharacter,
-    FormFeedCharacter,
+    NeedsGaiji,
+    Control,
+    Tab,
+    FormFeed,
 }
 
-impl CharIssue {
+impl CharacterIssue {
     const fn code(self) -> &'static str {
         match self {
-            Self::HalfwidthKatakana => codes::HALFWIDTH_KATAKANA,
-            Self::HalfwidthKanaPunctuation => codes::HALFWIDTH_KANA_PUNCTUATION,
             Self::PlatformDependent => codes::PLATFORM_DEPENDENT,
-            Self::NeedsGaijiChuki => codes::NEEDS_GAIJI_CHUKI,
-            Self::NotInJisX0213 => codes::NOT_IN_JISX0213,
-            Self::ControlCharacter => codes::CONTROL_CHARACTER,
-            Self::TabCharacter => codes::TAB_CHARACTER,
-            Self::FormFeedCharacter => codes::FORM_FEED_CHARACTER,
+            Self::NeedsGaiji => codes::NEEDS_GAIJI,
+            Self::Control => codes::CONTROL,
+            Self::Tab => codes::TAB,
+            Self::FormFeed => codes::FORM_FEED,
         }
     }
 
-    const fn severity(self) -> Severity {
+    const fn origin(self) -> Origin {
         match self {
-            Self::HalfwidthKatakana
-            | Self::HalfwidthKanaPunctuation
-            | Self::PlatformDependent
-            | Self::ControlCharacter
-            | Self::TabCharacter
-            | Self::FormFeedCharacter => Severity::Error,
-            Self::NeedsGaijiChuki | Self::NotInJisX0213 => Severity::Warning,
+            Self::Tab | Self::FormFeed => Origin::Submission,
+            Self::PlatformDependent | Self::NeedsGaiji | Self::Control => Origin::Character,
         }
     }
 
-    fn message(self, c: char) -> String {
+    fn messages(self, character: char) -> (String, String) {
         match self {
-            Self::HalfwidthKatakana => {
-                format!("半角カタカナ「{c}」は使用できません。全角に変換してください。")
-            }
-            Self::HalfwidthKanaPunctuation => {
-                format!("半角カナ用約物「{c}」は使用できません。対応する全角記号に変換してください。")
-            }
-            Self::PlatformDependent => format!(
-                "機種依存文字「{c}」は使用できません。外字注記（※［＃…］）に置き換えてください。"
+            Self::PlatformDependent => (
+                format!("Platform-dependent character {character:?} is outside JIS X 0208."),
+                format!("機種依存文字「{character}」は JIS X 0208 外です。"),
             ),
-            Self::NeedsGaijiChuki => {
-                format!("「{c}」は JIS X 0208 外（第3・第4水準）です。外字注記が必要です。")
-            }
-            Self::NotInJisX0213 => {
-                format!("「{c}」は JIS X 0213 にありません。外字注記または代替表記が必要です。")
-            }
-            Self::ControlCharacter => {
-                format!("制御文字 U+{:04X} は本文に使用できません。", u32::from(c))
-            }
-            Self::TabCharacter => {
-                "タブ文字は本文に使用できません。底本の配置を確認し、文字または青空文庫注記で表現してください。"
-                    .to_owned()
-            }
-            Self::FormFeedCharacter => {
-                "改ページ制御文字は本文に使用できません。［＃改ページ］などの青空文庫注記で表現してください。"
-                    .to_owned()
-            }
+            Self::NeedsGaiji => (
+                format!("Character {character:?} requires an external-character annotation."),
+                format!("「{character}」には外字注記が必要です。"),
+            ),
+            Self::Control => (
+                format!(
+                    "Control character U+{:04X} cannot occur in submission text.",
+                    u32::from(character)
+                ),
+                format!(
+                    "制御文字 U+{:04X} は提出本文に使用できません。",
+                    u32::from(character)
+                ),
+            ),
+            Self::Tab => (
+                "A tab cannot represent stable source layout.".to_owned(),
+                "タブでは底本の配置を安定して表現できません。".to_owned(),
+            ),
+            Self::FormFeed => (
+                "A form feed must be represented by an Aozora page-break annotation.".to_owned(),
+                "フォームフィードは青空文庫の改ページ注記で表します。".to_owned(),
+            ),
         }
     }
 }
 
-/// Classify a single character, or `None` if it is conformant (or ASCII).
-fn classify(c: char) -> Option<CharIssue> {
-    if c == '\t' {
-        return Some(CharIssue::TabCharacter);
+fn classify(character: char) -> Option<CharacterIssue> {
+    if character == '\t' {
+        return Some(CharacterIssue::Tab);
     }
-    if c == '\u{000C}' {
-        return Some(CharIssue::FormFeedCharacter);
+    if character == '\u{000C}' {
+        return Some(CharacterIssue::FormFeed);
     }
-    if matches!(c, '\u{0000}'..='\u{001F}' | '\u{007F}') && !matches!(c, '\r' | '\n') {
-        return Some(CharIssue::ControlCharacter);
+    if matches!(character, '\u{0000}'..='\u{001F}' | '\u{007F}')
+        && !matches!(character, '\r' | '\n')
+    {
+        return Some(CharacterIssue::Control);
     }
-    if c.is_ascii() {
+    if character.is_ascii() {
         return None;
     }
-    if ('\u{FF61}'..='\u{FF65}').contains(&c) {
-        return Some(CharIssue::HalfwidthKanaPunctuation);
+    if is_platform_dependent(character) {
+        return Some(CharacterIssue::PlatformDependent);
     }
-    if ('\u{FF66}'..='\u{FF9F}').contains(&c) {
-        return Some(CharIssue::HalfwidthKatakana);
-    }
-    if is_platform_dependent(c) {
-        return Some(CharIssue::PlatformDependent);
-    }
-    match jis_level(c) {
+    match jis_level(character) {
         Suijun::Level1 | Suijun::Level2 => None,
-        Suijun::Level3 | Suijun::Level4 => Some(CharIssue::NeedsGaijiChuki),
-        Suijun::Outside => Some(CharIssue::NotInJisX0213),
+        Suijun::Level3 | Suijun::Level4 | Suijun::Outside => Some(CharacterIssue::NeedsGaiji),
     }
 }
 
-/// Run the character-level checks over decoded UTF-8 `text`, returning findings
-/// in decoded byte coordinates.
-#[must_use]
-pub fn check(text: &str) -> Vec<Finding> {
+/// Run character and canonical-token checks over decoded text.
+///
+/// # Errors
+///
+/// Returns [`CheckError`] when catalog lookup or checked span arithmetic
+/// fails.
+pub fn check(text: &str) -> Result<Vec<Finding>, CheckError> {
     let mut findings = Vec::new();
-    for (offset, c) in text.char_indices() {
-        if let Some(issue) = classify(c) {
-            let start = u32::try_from(offset).unwrap_or(u32::MAX);
-            let end = u32::try_from(offset + c.len_utf8()).unwrap_or(u32::MAX);
-            findings.push(Finding {
-                code: issue.code(),
-                severity: issue.severity(),
-                origin: Origin::Character,
-                source: FindingSource::Source,
-                span: Span { start, end },
-                message: issue.message(c),
-                codepoint: Some(c),
-                suggestion: None,
-            });
+    let mut characters = text.char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        if let Some(finding) = halfwidth_finding(offset, character, &mut characters)? {
+            findings.push(finding);
+            continue;
+        }
+
+        if let Some(finding) = ruby_marker_finding(text, offset, character)? {
+            findings.push(finding);
+            continue;
+        }
+
+        let rest = text.get(offset..).ok_or(CheckError::DetectorInvariant {
+            operation: "reading a character-indexed source suffix",
+        })?;
+        if let Some(finding) = iteration_finding(rest, offset)? {
+            characters.next();
+            characters.next();
+            findings.push(finding);
+            continue;
+        }
+
+        if let Some(issue) = classify(character) {
+            findings.push(issue_finding(offset, character, issue)?);
         }
     }
-    findings
+    Ok(findings)
+}
+
+fn halfwidth_finding(
+    offset: usize,
+    character: char,
+    characters: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+) -> Result<Option<Finding>, CheckError> {
+    let Some(mut replacement) = halfwidth_equivalent(character) else {
+        return Ok(None);
+    };
+    let mut end =
+        offset
+            .checked_add(character.len_utf8())
+            .ok_or(CheckError::CoordinateOverflow {
+                operation: "computing a half-width kana span",
+            })?;
+    if let Some(&(_, mark)) = characters.peek()
+        && matches!(mark, '\u{FF9E}' | '\u{FF9F}')
+        && let Some(composed) = compose_kana(replacement, mark)
+    {
+        let (_, consumed) = characters.next().ok_or(CheckError::DetectorInvariant {
+            operation: "consuming a peeked half-width kana mark",
+        })?;
+        end = end
+            .checked_add(consumed.len_utf8())
+            .ok_or(CheckError::CoordinateOverflow {
+                operation: "extending a half-width kana span",
+            })?;
+        replacement = composed;
+    }
+    let character_span = span(offset, end)?;
+    Finding::from_rule(
+        codes::HALFWIDTH_KANA,
+        Origin::Character,
+        character_span,
+        FindingDetails::new(
+            format!("Half-width kana {character:?} has the full-width equivalent {replacement:?}."),
+            format!("半角カナ「{character}」は全角「{replacement}」に対応します。"),
+        )
+        .with_data(character_data(character))
+        .with_codepoint(character)
+        .with_fixes(vec![FixAlternative::safe_text(
+            character_span,
+            replacement.to_string(),
+            format!("Replace {character:?} with {replacement:?}"),
+            format!("「{character}」を「{replacement}」へ変換"),
+        )]),
+    )
+    .map(Some)
+}
+
+fn ruby_marker_finding(
+    text: &str,
+    offset: usize,
+    character: char,
+) -> Result<Option<Finding>, CheckError> {
+    if character != '|' {
+        return Ok(None);
+    }
+    let end = offset
+        .checked_add(character.len_utf8())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing a ruby marker span",
+        })?;
+    let rest = text.get(end..).ok_or(CheckError::DetectorInvariant {
+        operation: "reading the suffix after a ruby marker",
+    })?;
+    if !ruby_boundary_is_unambiguous(rest) {
+        return Ok(None);
+    }
+    let marker_span = span(offset, end)?;
+    Finding::from_rule(
+        codes::ASCII_RUBY_MARKER,
+        Origin::Notation,
+        marker_span,
+        FindingDetails::new(
+            "An ASCII vertical line starts a parser-recognizable ruby base.".to_owned(),
+            "被ルビ文字列の区切りに半角縦線が使われています。".to_owned(),
+        )
+        .with_codepoint(character)
+        .with_fixes(vec![FixAlternative::safe_text(
+            marker_span,
+            "｜".to_owned(),
+            "Replace the ASCII boundary marker".to_owned(),
+            "区切り記号を全角へ変換".to_owned(),
+        )]),
+    )
+    .map(Some)
+}
+
+fn iteration_finding(rest: &str, offset: usize) -> Result<Option<Finding>, CheckError> {
+    let Some(bad) = ["／〃＼", "／“＼", "／”＼"]
+        .into_iter()
+        .find(|candidate| rest.starts_with(candidate))
+    else {
+        return Ok(None);
+    };
+    let end = offset
+        .checked_add(bad.len())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing an iteration-mark span",
+        })?;
+    let iteration_span = span(offset, end)?;
+    Finding::from_rule(
+        codes::ITERATION_MARK,
+        Origin::Notation,
+        iteration_span,
+        FindingDetails::new(
+            "The voiced double iteration mark uses a non-canonical middle character.".to_owned(),
+            "濁点付き二倍踊り字の中央記号が規定形ではありません。".to_owned(),
+        )
+        .with_fixes(vec![FixAlternative::safe_text(
+            iteration_span,
+            "／″＼".to_owned(),
+            "Use the canonical double-prime form".to_owned(),
+            "規定の「／″＼」へ変換".to_owned(),
+        )]),
+    )
+    .map(Some)
+}
+
+fn issue_finding(
+    offset: usize,
+    character: char,
+    issue: CharacterIssue,
+) -> Result<Finding, CheckError> {
+    let end = offset
+        .checked_add(character.len_utf8())
+        .ok_or(CheckError::CoordinateOverflow {
+            operation: "computing a character-issue span",
+        })?;
+    let issue_span = span(offset, end)?;
+    let (message, message_ja) = issue.messages(character);
+    Finding::from_rule(
+        issue.code(),
+        issue.origin(),
+        issue_span,
+        FindingDetails::new(message, message_ja)
+            .with_data(character_data(character))
+            .with_codepoint(character)
+            .with_fixes(review_fixes(issue, issue_span)),
+    )
+}
+
+fn review_fixes(issue: CharacterIssue, issue_span: Span) -> Vec<FixAlternative> {
+    match issue {
+        CharacterIssue::FormFeed => vec![FixAlternative::review_text(
+            issue_span,
+            "［＃改ページ］".to_owned(),
+            "Represent as a page-break annotation".to_owned(),
+            "改ページ注記へ置換".to_owned(),
+        )],
+        CharacterIssue::Tab => vec![FixAlternative::review_text(
+            issue_span,
+            "［＃ここから1字下げ］".to_owned(),
+            "Represent as an indentation annotation".to_owned(),
+            "字下注記へ置換".to_owned(),
+        )],
+        CharacterIssue::PlatformDependent
+        | CharacterIssue::NeedsGaiji
+        | CharacterIssue::Control => Vec::new(),
+    }
+}
+
+fn span(start: usize, end: usize) -> Result<Span, CheckError> {
+    Span::try_from_usize(start, end)
+}
+
+fn character_data(character: char) -> BTreeMap<String, String> {
+    BTreeMap::from([(
+        "codepoint".to_owned(),
+        format!("U+{:04X}", u32::from(character)),
+    )])
+}
+
+fn ruby_boundary_is_unambiguous(rest: &str) -> bool {
+    let line = rest.lines().next().unwrap_or(rest);
+    line.find('《').is_some_and(|end| end > 0)
+}
+
+fn halfwidth_equivalent(character: char) -> Option<char> {
+    const FULLWIDTH: &str = "。「」、・ヲァィゥェォャュョッーアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン゛゜";
+    let index = u32::from(character).checked_sub(0xFF61)?;
+    usize::try_from(index)
+        .ok()
+        .and_then(|position| FULLWIDTH.chars().nth(position))
+}
+
+const fn compose_kana(base: char, mark: char) -> Option<char> {
+    match (base, mark) {
+        ('ウ', '\u{FF9E}') => Some('ヴ'),
+        ('カ', '\u{FF9E}') => Some('ガ'),
+        ('キ', '\u{FF9E}') => Some('ギ'),
+        ('ク', '\u{FF9E}') => Some('グ'),
+        ('ケ', '\u{FF9E}') => Some('ゲ'),
+        ('コ', '\u{FF9E}') => Some('ゴ'),
+        ('サ', '\u{FF9E}') => Some('ザ'),
+        ('シ', '\u{FF9E}') => Some('ジ'),
+        ('ス', '\u{FF9E}') => Some('ズ'),
+        ('セ', '\u{FF9E}') => Some('ゼ'),
+        ('ソ', '\u{FF9E}') => Some('ゾ'),
+        ('タ', '\u{FF9E}') => Some('ダ'),
+        ('チ', '\u{FF9E}') => Some('ヂ'),
+        ('ツ', '\u{FF9E}') => Some('ヅ'),
+        ('テ', '\u{FF9E}') => Some('デ'),
+        ('ト', '\u{FF9E}') => Some('ド'),
+        ('ハ', '\u{FF9E}') => Some('バ'),
+        ('ヒ', '\u{FF9E}') => Some('ビ'),
+        ('フ', '\u{FF9E}') => Some('ブ'),
+        ('ヘ', '\u{FF9E}') => Some('ベ'),
+        ('ホ', '\u{FF9E}') => Some('ボ'),
+        ('ハ', '\u{FF9F}') => Some('パ'),
+        ('ヒ', '\u{FF9F}') => Some('ピ'),
+        ('フ', '\u{FF9F}') => Some('プ'),
+        ('ヘ', '\u{FF9F}') => Some('ペ'),
+        ('ホ', '\u{FF9F}') => Some('ポ'),
+        ('ワ', '\u{FF9E}') => Some('ヷ'),
+        ('ヲ', '\u{FF9E}') => Some('ヺ'),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::{FixApplicability, FixOperation};
+
     use super::*;
 
     #[test]
-    fn flags_halfwidth_katakana() {
-        let f = check("\u{FF71}");
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].code, codes::HALFWIDTH_KATAKANA);
-        assert_eq!(f[0].severity, Severity::Error);
+    fn halfwidth_pairs_have_one_safe_composed_fix() {
+        let findings = check("ｶﾞ").expect("character check");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].code, codes::HALFWIDTH_KANA);
+        let fix = findings[0].fixes.first().expect("safe fix");
+        assert_eq!(fix.applicability, FixApplicability::Safe);
+        assert!(matches!(fix.operation, FixOperation::Text(_)));
+        if let FixOperation::Text(edit) = &fix.operation {
+            assert_eq!(edit.replacement, "ガ");
+            assert_eq!(edit.span, Span { start: 0, end: 6 });
+        }
     }
 
     #[test]
-    fn distinguishes_halfwidth_kana_punctuation() {
-        let findings = check("\u{FF62}\u{FF65}\u{FF63}");
-        assert_eq!(findings.len(), 3);
+    fn safe_notation_spellings_are_detected() {
+        let findings = check("|青空《あおぞら》／〃＼").expect("character check");
         assert!(
             findings
                 .iter()
-                .all(|finding| finding.code == codes::HALFWIDTH_KANA_PUNCTUATION)
+                .any(|finding| finding.code == codes::ASCII_RUBY_MARKER)
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.code == codes::ITERATION_MARK)
         );
     }
 
     #[test]
-    fn flags_platform_dependent_over_gaiji() {
-        let f = check("\u{2460}"); // ①
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].code, codes::PLATFORM_DEPENDENT);
-        assert_eq!(f[0].severity, Severity::Error);
-    }
-
-    #[test]
-    fn flags_third_level_kanji() {
-        let f = check("\u{4FF1}"); // 俱 第3水準
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].code, codes::NEEDS_GAIJI_CHUKI);
-        assert_eq!(f[0].severity, Severity::Warning);
-    }
-
-    #[test]
-    fn distinguishes_actionable_control_characters() {
-        let findings = check("a\tb\u{000C}c\u{007F}d\r\n");
-        assert_eq!(findings.len(), 3);
-        assert_eq!(findings[0].code, codes::TAB_CHARACTER);
-        assert_eq!(findings[1].code, codes::FORM_FEED_CHARACTER);
-        assert_eq!(findings[2].code, codes::CONTROL_CHARACTER);
-    }
-
-    #[test]
-    fn clean_text_has_no_findings() {
-        assert!(check("青空文庫のふつうの文章。亜").is_empty());
-    }
-
-    #[test]
-    fn span_and_codepoint_are_correct() {
-        // "あ①": あ is 3 bytes (0..3), ① is 3 bytes (3..6).
-        let f = check("あ\u{2460}");
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].span, Span { start: 3, end: 6 });
-        assert_eq!(f[0].codepoint, Some('\u{2460}'));
-    }
-
-    #[test]
-    fn notation_markers_are_not_flagged() {
-        // ｜ ＃ ［ ］ are full-width-alias JIS cells; misclassifying them
-        // would flag every ruby / annotation marker in real text.
-        assert!(check("｜青空《あおぞら》").is_empty());
-        assert!(check("※［＃「青」に傍点］").is_empty());
+    fn clean_character_text_has_no_findings() {
+        assert!(
+            check("青空文庫のふつうの文章。亜")
+                .expect("character check")
+                .is_empty()
+        );
     }
 }

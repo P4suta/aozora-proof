@@ -1,34 +1,39 @@
 //! Synthetic defects seeded into otherwise ordinary 青空文庫 text.
 
+#![allow(
+    clippy::expect_used,
+    reason = "test fixtures are required to produce complete reports"
+)]
+
 use aozora_proof_core::run_all;
 
 const CASES: &[(&str, &[u8], &str)] = &[
     (
         "halfwidth katakana",
         include_bytes!("fixtures/mutations/halfwidth-katakana.txt"),
-        "aozora::char::halfwidth_katakana",
+        "aozora::proof::character::halfwidth_kana",
     ),
     (
         "platform dependent",
         include_bytes!("fixtures/mutations/platform-dependent.txt"),
-        "aozora::char::platform_dependent",
+        "aozora::proof::character::platform_dependent",
     ),
     (
         "third level",
         include_bytes!("fixtures/mutations/third-level.txt"),
-        "aozora::char::needs_gaiji_chuki",
+        "aozora::proof::character::needs_gaiji",
     ),
     (
         "tab character",
         include_bytes!("fixtures/mutations/control-character.txt"),
-        "aozora::char::tab_character",
+        "aozora::proof::layout::tab",
     ),
 ];
 
 #[test]
 fn every_seeded_defect_is_detected() {
     for (name, input, expected) in CASES {
-        let report = run_all(input);
+        let report = run_all(input).expect("mutation input checks");
         assert!(
             report
                 .findings
@@ -41,5 +46,10 @@ fn every_seeded_defect_is_detected() {
 
 #[test]
 fn clean_counterpart_stays_clean() {
-    assert!(run_all("青空文庫\r\n".as_bytes()).findings.is_empty());
+    assert!(
+        run_all("青空文庫\r\n".as_bytes())
+            .expect("clean input checks")
+            .findings
+            .is_empty()
+    );
 }

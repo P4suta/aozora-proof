@@ -15,14 +15,16 @@ The tools deliberately differ at the product boundary:
 |---|---|---|
 | JIS外字 and half-width katakana | Default checks | Default checks |
 | Control characters | Marked in output | Error finding |
-| Half-width spaces, ASCII parentheses, full-width tilde | Default checks | Audit-only candidates |
-| Old/new-form characters | Optional checker | Note with suggestion |
-| Source modification | Annotated transformed output | Read-only report and diff preview |
+| Half-width spaces and ASCII parentheses | Default checks | Contextual review findings |
+| Full-width tilde | Default check | Audit-only candidate |
+| Old/new-form characters | Optional checker | Directional review alternatives |
+| Source modification | Annotated transformed output | Typed safe fix or confirmed review edit |
 | Aozora notation structure | Character-oriented exceptions | Parsed spans from `aozora` |
 
-The public corpus shows why the differing defaults matter: the three
-audit-only character classes occur in hundreds of released files. They need
-contextual review before becoming user-facing warnings.
+The public corpus shows why the differing defaults matter: broad character
+classes occur in hundreds of released files. Version 0.2 narrows its
+user-facing spacing rule by neighboring script and keeps every result in the
+review class.
 
 The comparison is semantic rather than byte-for-byte. A disagreement is
 classified under the corpus audit protocol before changing a default rule.
