@@ -5,4 +5,7 @@ allowBuilds:
 # Force the patched cookie (SvelteKit pulls ^0.6.0; 0.6.0 has GHSA-pxg6-pf52-xh8x).
 # 0.7.x is API-compatible with kit's parse/serialize usage.
 overrides:
+  brace-expansion: 5.0.8
   cookie: '^0.7.0'
+  devalue: 5.8.2
+  postcss: 8.5.18
