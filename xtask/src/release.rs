@@ -871,14 +871,49 @@ fn preflight(repository: &str, commit: &str) -> Result<(), String> {
         return Err("preflight commit must be a full lowercase SHA-1 or HEAD".to_owned());
     }
     let runs = gh_json(&format!(
-        "repos/{repository}/actions/workflows/release-ready.yml/runs?head_sha={resolved_commit}&status=success&event=push&per_page=1"
+        "repos/{repository}/actions/workflows/release-ready.yml/runs?head_sha={resolved_commit}&status=success&per_page=100"
     ))?;
-    if runs.get("total_count").and_then(Value::as_u64) == Some(0) {
-        return Err(format!(
-            "no successful release-ready push run exists for {resolved_commit}"
-        ));
+    let artifact_name = format!("release-qualified-{resolved_commit}");
+    for run_id in qualification_run_ids(&runs, &resolved_commit) {
+        let artifacts = gh_json(&format!(
+            "repos/{repository}/actions/runs/{run_id}/artifacts?name={artifact_name}"
+        ))?;
+        if has_unexpired_artifact(&artifacts, &artifact_name) {
+            return Ok(());
+        }
     }
-    Ok(())
+    Err(format!(
+        "no successful release-ready run with qualified artifacts exists for {resolved_commit}"
+    ))
+}
+
+fn qualification_run_ids(runs: &Value, commit: &str) -> Vec<u64> {
+    runs.get("workflow_runs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|run| {
+            run.get("head_sha").and_then(Value::as_str) == Some(commit)
+                && run.get("conclusion").and_then(Value::as_str) == Some("success")
+                && matches!(
+                    run.get("event").and_then(Value::as_str),
+                    Some("push" | "workflow_dispatch")
+                )
+        })
+        .filter_map(|run| run.get("id").and_then(Value::as_u64))
+        .collect()
+}
+
+fn has_unexpired_artifact(artifacts: &Value, expected_name: &str) -> bool {
+    artifacts
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|artifact| {
+            artifact.get("name").and_then(Value::as_str) == Some(expected_name)
+                && artifact.get("expired").and_then(Value::as_bool) == Some(false)
+        })
 }
 
 fn check_environment_pattern(
@@ -1185,6 +1220,58 @@ mod tests {
                 manual: true,
             }
         ));
+    }
+
+    #[test]
+    fn preflight_accepts_only_qualified_runs_with_live_artifacts() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let other_commit = "fedcba9876543210fedcba9876543210fedcba98";
+        let runs = serde_json::json!({
+            "workflow_runs": [
+                {
+                    "id": 41,
+                    "event": "workflow_dispatch",
+                    "head_sha": commit,
+                    "conclusion": "success"
+                },
+                {
+                    "id": 42,
+                    "event": "push",
+                    "head_sha": commit,
+                    "conclusion": "success"
+                },
+                {
+                    "id": 43,
+                    "event": "pull_request",
+                    "head_sha": commit,
+                    "conclusion": "success"
+                },
+                {
+                    "id": 44,
+                    "event": "workflow_dispatch",
+                    "head_sha": other_commit,
+                    "conclusion": "success"
+                },
+                {
+                    "id": 45,
+                    "event": "push",
+                    "head_sha": commit,
+                    "conclusion": "failure"
+                }
+            ]
+        });
+        assert_eq!(qualification_run_ids(&runs, commit), vec![41, 42]);
+
+        let name = format!("release-qualified-{commit}");
+        let live = serde_json::json!({
+            "artifacts": [{"name": name, "expired": false}]
+        });
+        let expired = serde_json::json!({
+            "artifacts": [{"name": name, "expired": true}]
+        });
+        assert!(has_unexpired_artifact(&live, &name));
+        assert!(!has_unexpired_artifact(&expired, &name));
+        assert!(!has_unexpired_artifact(&live, "release-qualified-other"));
     }
 
     fn validate_artifact_fixture(manifest: &ArtifactManifest) -> Result<(), String> {
