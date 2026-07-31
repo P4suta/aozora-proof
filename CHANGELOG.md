@@ -4,6 +4,15 @@ All notable changes to aozora-proof are recorded in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1](https://github.com/P4suta/aozora-proof/compare/v0.1.0...v0.1.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **release:** make qualification portable and recoverable ([#50](https://github.com/P4suta/aozora-proof/issues/50)) ([c315b13](https://github.com/P4suta/aozora-proof/commit/c315b13690abf3d6996ceba2fb310a0ee169f3eb))
+* **release:** recognize recovered qualifications ([#52](https://github.com/P4suta/aozora-proof/issues/52)) ([e006f7e](https://github.com/P4suta/aozora-proof/commit/e006f7e7a08ada41427f8b87579e8ed7b3af2df7))
+* **release:** reuse manual qualification artifacts ([#51](https://github.com/P4suta/aozora-proof/issues/51)) ([7039934](https://github.com/P4suta/aozora-proof/commit/7039934d01574d654e5707896f35d3e75287bf57))
+
 ## [0.1.0] - 2026-07-31
 
 ### Changed
