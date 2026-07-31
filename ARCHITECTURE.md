@@ -1,105 +1,111 @@
 # Architecture
 
-`aozora-proof` proofreads **青空文庫記法 (Aozora Bunko notation)** text. Its one
-load-bearing idea is a split of responsibilities:
+`aozora-proof` adds submission policy around the
+[`aozora`](https://github.com/P4suta/aozora) parser. The parser remains
+responsible for notation syntax and original-source diagnostics; this
+repository owns character facts, submission requirements, fix safety, and
+presentation.
 
-- **Notation level** — ruby, bouten, 外字 resolution, bracket pairing, and the
-  structured diagnostics that come with them — belongs to the sibling
-  [`aozora`](https://github.com/P4suta/aozora) parser. We *consume* it; we do
-  not reimplement it.
-- **Character level** — whether each character may appear literally in
-  conformant text (JIS X 0208 conformance, 機種依存文字, half/full-width,
-  旧字体↔新字体) plus file-structure checks (BOM, line endings, encoding) — is
-  what this repository owns.
-
-`run_all` runs both and merges them into one unified report.
-
-## Crates
-
-```
-aozora-proof-cli  ──┐
-                    ├──> aozora-proof-core ──> aozora-proof-data
-aozora-proof-wasm ──┘
+```text
+CLI ─────┐
+         ├─> core ─> data
+WASM ────┘
 ```
 
-`cli` and `wasm` are façades over `core`; `core` bakes in `data`'s tables.
-These crates are private workspace modules. Their names and boundaries do not
-promise separate registry packages.
+All workspace crates are private and `publish = false`.
 
-| crate | role | boundary |
-|---|---|---|
-| `aozora-proof-core` | the engine: `&[u8]` / `&str` → findings | pure, `forbid(unsafe)`, **WASM-clean** (no I/O, no host-only deps) |
-| `aozora-proof-data` | JIS 水準 / 機種依存文字 / 旧字体 / gaiji tables | baked at build time from vendored sources via `build.rs` |
-| `aozora-proof-cli`  | argument parsing, file I/O, output formatting | the only crate that touches the filesystem |
-| `aozora-proof-wasm` | `checkJson` / `gaijiSearchJson` / `schemaVersion` | wasm-bindgen exports gated on `cfg(target_arch = "wasm32")`; plain functions on host builds |
+| crate | responsibility |
+|---|---|
+| `aozora-proof-data` | build-time JIS, platform-dependent, orthography, and gaiji tables |
+| `aozora-proof-core` | pure Rule Catalog, checks, fixes, and schema-v2 serialization |
+| `aozora-proof-cli` | configuration, discovery, I/O, rendering, watch mode, and review TUI |
+| `aozora-proof-wasm` | browser façade over the same catalog and machine report |
 
-The core stays pure so the *same* engine drives the CLI and the in-browser web app.
+## Rule and requirement model
 
-Character facts remain in the unpublished `aozora-proof-data` crate while the
-rules are validated. [ADR 0004](docs/adr/0004-promote-character-facts-on-demand.md)
-requires a real second consumer and conformance evidence before any individual
-fact becomes public `aozora` API or any internal crate becomes a release unit.
+The Rule Catalog is the only source for a proof-owned code, category, default
+severity, English/Japanese text, detection class, fix applicability, official
+authority, and examples. Codes are
+`aozora::proof::<category>::<rule>`; upstream parser codes remain
+`aozora::lex::*`.
 
-## The pipeline
+Official requirements are catalogued as `Automatic`, `Review`, or `Manual`.
+The coverage test rejects an official item with no rule and a rule not
+referenced by any official item. Manual requirements appear in machine
+summaries and the review checklist, so `Report::conformant` means only that the
+automatically decidable subset conforms.
 
-`core::run_all(raw: &[u8]) -> Report` is the shared engine and
-`core::run_submission(raw: &[u8]) -> Report` adds submission-format policy
-([`crates/aozora-proof-core/src/pipeline.rs`](crates/aozora-proof-core/src/pipeline.rs)):
+## Pipeline
 
-1. **File-structure checks** on the raw bytes — BOM, CRLF vs LF, encoding.
-2. **Decode** to UTF-8 (UTF-8, falling back to Shift_JIS).
-3. **Notation layer** — hand the decoded text to the `aozora` parser and lift
-   each diagnostic into a unified `Finding`.
-4. **Character layers** — `moji` (conformance) and `kyuji` (旧字体↔新字体) over
-   the decoded text. (`gaiji_dict` powers the reverse-lookup `gaiji` subcommand.)
+`run_submission_with_orthography(raw, policy)` performs:
 
-Everything is merged into one `Report { findings, decoded }`, sorted by span, in
-a single **decoded** coordinate frame.
+1. raw-byte encoding, BOM, line-ending, and final-newline checks;
+2. UTF-8 or Shift_JIS decoding into one decoded coordinate frame;
+3. upstream notation diagnostics;
+4. character, gaiji, contextual-review, and directional-orthography checks;
+5. opening and closing submission-wrapper checks;
+6. stable ordering by decoded byte span and rule code.
 
-### Coordinate frames
+Each `Finding` has a decoded UTF-8 byte span. Unicode line and code-point
+columns are derived from the decoded text during serialization. Raw-byte
+operations such as BOM removal and encoding conversion remain structured fix
+operations rather than pretending to be decoded text edits.
 
-Every finding is reported in the **decoded source** frame so character and
-notation findings line up:
+## Fix safety
 
-- **raw** — original file bytes (BOM, CRLF, original encoding).
-- **decoded** — the UTF-8 string the character layers index into.
-The parser may sanitize internally, but `aozora` 0.5 maps diagnostics back to
-original source spans before exposing `Snapshot::diagnostics()`. This
-repository consumes those source spans and does not duplicate the parser's
-coordinate map.
+`FixApplicability` is `Safe` or `Review`; absence of a fix represents `None`.
+A safe operation has one meaning-independent result. The planner rejects
+overlapping text edits, applies all operations in memory to a fixed point,
+reruns the submission checks, and requires exact Shift_JIS round-trip
+encoding. The CLI then preserves permissions and uses an atomic replacement
+only when the on-disk bytes still match those originally read.
 
-## The wire contract
+The TUI uses the same edit primitives but stores review decisions only in its
+session. It prepares every changed file before writing any and reuses the
+concurrent-change guard.
 
-Output is a stable JSON envelope owned by this repo, independent of the parser's:
+## Configuration and discovery
+
+Configuration merges the platform user file and nearest project file before
+environment and command flags are applied. Per-path overrides are evaluated
+against normalized display paths. Unknown keys are rejected by TOML
+deserialization and unknown rule codes are checked against the catalog.
+
+Directory discovery returns normalized, deduplicated, sorted paths. Ignore
+files affect discovered entries only; explicit file arguments bypass them.
+Symlinked directories and hidden paths are not traversed.
+
+## Machine contracts
+
+Schema v2 is a top-level object:
 
 ```json
-{ "schema_version": 1, "data": [ /* findings */ ] }
+{
+  "schemaVersion": 2,
+  "tool": {"name": "aozora-proof", "version": "0.2.0"},
+  "summary": {},
+  "files": []
+}
 ```
 
-`SCHEMA_VERSION` lives in
-[`finding.rs`](crates/aozora-proof-core/src/finding.rs) and is the seam shared by
-core ↔ cli ↔ wasm ↔ the web app. Each `Finding` carries a stable string `code`
-(e.g. `aozora::char::platform_dependent`), a `severity`, a decoded `span`, a
-Japanese `message`, and an optional `suggestion` (e.g. a 旧字体→新字体 rewrite).
-The CLI renders this envelope as human / JSON / short / SARIF; the WASM façade
-hands it to the web app verbatim.
+Files expose path, encoding, line ending, orthography, `conformant`,
+`reviewPending`, and findings. Findings expose code, category, severity,
+source, `utf8ByteSpan`, one-based Unicode position, canonical English message,
+structured data, authority URL, and fix alternatives.
 
-## Data provenance
+Compact JSON serialization plus stable input/finding ordering makes machine
+output byte-stable. SARIF uses `unicodeCodePoints`, declares artifact encoding,
+links rule help to its authority, and emits replacement regions for text
+edits. Human output alone is localized and terminal-dependent.
 
-`aozora-proof-data` bakes lookup tables at build time from vendored sources:
+## Distribution
 
-- **JIS X 0213** mapping (水準 classification, 面区点) — `jisx0213-2004-std.txt`.
-- **常用漢字表** 旧字体↔新字体 pairs — `joyo-kyujitai.tsv`.
-- **外字注記辞書** descriptions for gaiji search — `aozora-gaiji-chuki.tsv`.
+Supported installations are GitHub Release archives and the composite GitHub
+Action. Release automation builds five platform targets, generates the man
+page and completions from Clap, writes per-archive and aggregate SHA-256
+digests, emits an SPDX JSON SBOM, and creates GitHub provenance attestations.
+The action downloads the selected archive and verifies both its digest and
+attestation; it never invokes Cargo.
 
-Each carries its own upstream license; see [`NOTICE`](NOTICE).
-
-Per [ADR 0004](docs/adr/0004-promote-character-facts-on-demand.md), these tables
-remain experimental until a second implemented consumer demonstrates the need
-for a narrower upstream API.
-
-## Where to add a check
-
-Character checks live in `core` (`moji`, `kyuji`) and emit `Finding`s with a new
-stable `code`. Notation-level behavior belongs **upstream** in `aozora`, not
-here. Keep `core` free of I/O and `unsafe` so it stays WASM-clean.
+See [ADR 0005](docs/adr/0005-submission-proofreading-cli.md) for the governing
+decision.

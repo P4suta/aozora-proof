@@ -29,7 +29,7 @@ mapping for a JIS cell but discarded its Windows mapping alias. Registering
 both aliases reduced that result to 10 findings without weakening known
 platform-dependent cases such as circled numbers.
 
-The audit-only candidate rules produced:
+The original broad audit probes produced:
 
 | Candidate | Findings | Files |
 |---|---:|---:|
@@ -59,9 +59,10 @@ suggesting an unsafe blanket deletion. The half-width punctuation and
 platform-dependent characters still violate the submission character set;
 each occurrence requires confirmation against the source book before editing.
 
-These candidates remain experimental. Their frequency and dependence on
-notation context make them unsuitable as default warnings without manual
-classification.
+Version 0.2 does not promote these broad probes wholesale. It emits a review
+finding only for an ASCII space between Japanese characters or an ASCII
+bracket touching Japanese text; the full-width tilde probe remains audit-only.
+The historical counts above therefore are not expected 0.2 finding counts.
 
 This baseline is evidence for continued validation, not a release decision or
 a claim that every finding is a manuscript defect. The aggregate report is

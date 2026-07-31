@@ -6,22 +6,22 @@ const CASES: &[(&str, &[u8], &str)] = &[
     (
         "halfwidth katakana",
         include_bytes!("fixtures/mutations/halfwidth-katakana.txt"),
-        "aozora::char::halfwidth_katakana",
+        "aozora::proof::character::halfwidth_kana",
     ),
     (
         "platform dependent",
         include_bytes!("fixtures/mutations/platform-dependent.txt"),
-        "aozora::char::platform_dependent",
+        "aozora::proof::character::platform_dependent",
     ),
     (
         "third level",
         include_bytes!("fixtures/mutations/third-level.txt"),
-        "aozora::char::needs_gaiji_chuki",
+        "aozora::proof::character::needs_gaiji",
     ),
     (
         "tab character",
         include_bytes!("fixtures/mutations/control-character.txt"),
-        "aozora::char::tab_character",
+        "aozora::proof::layout::tab",
     ),
 ];
 

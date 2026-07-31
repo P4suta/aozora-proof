@@ -127,6 +127,22 @@ ci: fmt-check clippy test doc deny typos lint-toml lint-actions lint-web
 ci-full: ci cov
     @echo "ci-full: all CI jobs reproduced locally"
 
+# Native release gate for the generated reference assets.
+ci-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    release_dir=$(mktemp -d)
+    release_target=${CARGO_TARGET_DIR:-target}
+    trap 'rm -rf "$release_dir"' EXIT
+    cargo build --locked --release -p aozora-proof-cli
+    "$release_target/release/aozora-proof" man > "$release_dir/aozora-proof.1"
+    for shell in bash zsh fish powershell elvish; do
+      "$release_target/release/aozora-proof" completions "$shell" > "$release_dir/aozora-proof.$shell"
+    done
+    test -s "$release_dir/aozora-proof.1"
+    "$release_target/release/aozora-proof" --version | grep -q '^aozora-proof 0\.2\.0 '
+    echo "ci-release: native binary, man page, and completions passed"
+
 # ---- web app ---------------------------------------------------------------
 
 # install the web app's Node dependencies (Node 24+ and pnpm required).

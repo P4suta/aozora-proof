@@ -1,5 +1,5 @@
 name: "Aozora Proof"
-description: "Check 青空文庫記法 (Aozora Bunko notation) text files for character-level conformance, with SARIF upload to the Security tab."
+description: "Run submission-quality checks for Aozora Bunko text and optionally upload SARIF."
 author: "aozora-proof contributors"
 branding:
   icon: "check-circle"
@@ -7,47 +7,111 @@ branding:
 
 inputs:
   files:
-    description: "Space-separated files / globs to check (bash globstar is enabled)."
+    description: "Space-separated files or globs to check."
     required: false
     default: "**/*.txt"
+  orthography:
+    description: "Character-form policy: modern, traditional, or mixed."
+    required: false
+    default: "mixed"
   fail-on:
-    description: "Fail the job on findings at or above this severity (error | warning | note)."
+    description: "Fail on findings at or above error, warning, or note."
     required: false
     default: "error"
+  version:
+    description: "aozora-proof release version to download."
+    required: false
+    default: "0.2.0"
   upload-sarif:
-    description: "Upload results to the Security tab (needs `security-events: write`)."
+    description: "Upload results to code scanning; requires security-events: write."
     required: false
     default: "true"
+
 runs:
   using: "composite"
   steps:
-    - name: Install aozora-proof from source
+    - name: Install verified release
       shell: bash
+      env:
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        GH_TOKEN: ${{ github.token }}
+        INPUT_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        cargo install --locked --git https://github.com/P4suta/aozora-proof.git aozora-proof-cli
+        version="${INPUT_VERSION#v}"
+        tag="v${version}"
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64) target="x86_64-unknown-linux-musl" ;;
+          Linux-ARM64) target="aarch64-unknown-linux-musl" ;;
+          macOS-X64) target="x86_64-apple-darwin" ;;
+          macOS-ARM64) target="aarch64-apple-darwin" ;;
+          Windows-X64) target="x86_64-pc-windows-msvc" ;;
+          *)
+            echo "aozora-proof: unsupported runner ${RUNNER_OS}-${RUNNER_ARCH}" >&2
+            exit 2
+            ;;
+        esac
+        package="aozora-proof-${tag}-${target}"
+        archive="${package}.tar.gz"
+        repository="${ACTION_REPOSITORY:-P4suta/aozora-proof}"
+        base_url="https://github.com/${repository}/releases/download/${tag}"
+        install_dir="${RUNNER_TEMP}/aozora-proof-${version}"
+        mkdir -p "$install_dir"
+        curl --fail --location --silent --show-error \
+          --output "${install_dir}/${archive}" "${base_url}/${archive}"
+        curl --fail --location --silent --show-error \
+          --output "${install_dir}/${archive}.sha256" "${base_url}/${archive}.sha256"
+        (
+          cd "$install_dir"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum --check "${archive}.sha256"
+          else
+            shasum --algorithm 256 --check "${archive}.sha256"
+          fi
+          tar -xzf "$archive"
+        )
+        gh attestation verify "${install_dir}/${archive}" --repo "$repository"
+        echo "${install_dir}/${package}/bin" >> "$GITHUB_PATH"
+
     - name: Check
       id: check
       shell: bash
+      env:
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_ORTHOGRAPHY: ${{ inputs.orthography }}
       run: |
         set +e
         shopt -s globstar nullglob
-        # shellcheck disable=SC2086
-        files=( ${{ inputs.files }} )
+        read -r -a patterns <<< "$INPUT_FILES"
+        files=()
+        for pattern in "${patterns[@]}"; do
+          while IFS= read -r match; do
+            files+=("$match")
+          done < <(compgen -G "$pattern")
+        done
         sarif="$RUNNER_TEMP/aozora-proof.sarif"
-        if [ ${#files[@]} -eq 0 ]; then
-          echo "aozora-proof: no files matched '${{ inputs.files }}'"
-          printf '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"aozora-proof"}},"results":[]}]}' > "$sarif"
+        if [ "${#files[@]}" -eq 0 ]; then
+          echo "aozora-proof: no files matched '$INPUT_FILES'"
+          printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"aozora-proof"}},"results":[]}]}' > "$sarif"
           echo "exit_code=0" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        aozora-proof check "${files[@]}" --format sarif --fail-on "${{ inputs.fail-on }}" > "$sarif"
+        aozora-proof check "${files[@]}" \
+          --orthography "$INPUT_ORTHOGRAPHY" \
+          --no-input \
+          --format sarif \
+          --fail-on "$INPUT_FAIL_ON" > "$sarif"
         echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
     - name: Upload SARIF
       if: ${{ inputs.upload-sarif == 'true' }}
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ runner.temp }}/aozora-proof.sarif
+
     - name: Enforce threshold
       shell: bash
-      run: exit ${{ steps.check.outputs.exit_code }}
+      env:
+        EXIT_CODE: ${{ steps.check.outputs.exit_code }}
+      run: exit "$EXIT_CODE"

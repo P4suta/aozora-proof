@@ -13,13 +13,15 @@
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-/// Run the full proofreading pipeline over `text` (UTF-8) and return the
-/// findings as the `{ "schema_version", "data" }` JSON envelope.
+/// Run submission checks over UTF-8 text with direction-neutral orthography.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(js_name = checkJson))]
 #[must_use]
 pub fn check_json(text: &str) -> String {
-    let report = aozora_proof_core::run_all(text.as_bytes());
-    aozora_proof_core::serialize_findings(&report.findings)
+    let report = aozora_proof_core::run_submission_with_orthography(
+        text.as_bytes(),
+        aozora_proof_core::Orthography::Mixed,
+    );
+    aozora_proof_core::serialize_report(&report)
 }
 
 /// Search the 外字注記辞書 for descriptions containing `query`; returns a JSON
@@ -41,8 +43,7 @@ pub fn gaiji_search_json(query: &str) -> String {
         .unwrap_or_else(|_| String::from(r#"{"matches":[]}"#))
 }
 
-/// Map every documented finding `code` to its human-readable Japanese title, as
-/// a JSON object `{ "aozora::char::platform_dependent": "機種依存文字", … }`.
+/// Map every documented finding code to its Japanese title.
 ///
 /// The web app shows this readable category instead of the raw internal code.
 /// Codes without a `RuleDoc` (e.g. notation `aozora::lex::*`) are absent.
@@ -51,9 +52,32 @@ pub fn gaiji_search_json(query: &str) -> String {
 pub fn rule_titles_json() -> String {
     let map: serde_json::Map<String, serde_json::Value> = aozora_proof_core::all_rules()
         .iter()
-        .map(|r| (r.code.to_owned(), serde_json::Value::from(r.title)))
+        .map(|rule| (rule.code.to_owned(), serde_json::Value::from(rule.title_ja)))
         .collect();
     serde_json::to_string(&map).unwrap_or_else(|_| String::from("{}"))
+}
+
+/// Return the bilingual rule catalog shared with the native CLI.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen(js_name = ruleCatalogJson))]
+#[must_use]
+pub fn rule_catalog_json() -> String {
+    let rules: Vec<serde_json::Value> = aozora_proof_core::all_rules()
+        .iter()
+        .map(|rule| {
+            serde_json::json!({
+                "code": rule.code,
+                "category": rule.category.as_wire_str(),
+                "severity": rule.default_severity.as_wire_str(),
+                "title": { "en": rule.title, "ja": rule.title_ja },
+                "rationale": { "en": rule.rationale, "ja": rule.rationale_ja },
+                "detection": rule.detection.as_wire_str(),
+                "fix": rule.fix.map(aozora_proof_core::FixApplicability::as_wire_str),
+                "authorityUrl": rule.authority_url,
+            })
+        })
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "rules": rules }))
+        .unwrap_or_else(|_| String::from(r#"{"rules":[]}"#))
 }
 
 /// The wire-format schema version (matches `aozora_proof_core::SCHEMA_VERSION`).
@@ -74,7 +98,7 @@ mod tests {
     #[test]
     fn check_json_emits_envelope() {
         let json = check_json("\u{2460}"); // ①
-        assert!(json.starts_with(r#"{"schema_version":1,"data":["#));
+        assert!(json.starts_with(r#"{"schemaVersion":2,"tool":"#));
         assert!(json.contains("platform_dependent"));
     }
 
@@ -90,7 +114,7 @@ mod tests {
         let json = rule_titles_json();
         let map: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
-            map.get("aozora::char::platform_dependent")
+            map.get("aozora::proof::character::platform_dependent")
                 .and_then(serde_json::Value::as_str),
             Some("機種依存文字")
         );
@@ -99,7 +123,14 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_is_one() {
-        assert_eq!(schema_version(), 1);
+    fn catalog_is_bilingual() {
+        let json = rule_catalog_json();
+        assert!(json.contains("\"en\""));
+        assert!(json.contains("\"ja\""));
+    }
+
+    #[test]
+    fn schema_version_is_two() {
+        assert_eq!(schema_version(), 2);
     }
 }

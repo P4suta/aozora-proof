@@ -13,12 +13,12 @@ fn codes(text: &str) -> Vec<&'static str> {
 #[test]
 fn documented_jis_and_gaiji_examples_agree() {
     assert!(codes("森鴎外").is_empty());
-    assert!(codes("森鷗外").contains(&"aozora::char::needs_gaiji_chuki"));
+    assert!(codes("森鷗外").contains(&"aozora::proof::character::needs_gaiji"));
 }
 
 #[test]
 fn documented_character_failures_agree() {
-    assert!(codes("ｴ").contains(&"aozora::char::halfwidth_katakana"));
-    assert!(codes("①").contains(&"aozora::char::platform_dependent"));
-    assert!(codes("\u{0}").contains(&"aozora::char::control_character"));
+    assert!(codes("ｴ").contains(&"aozora::proof::character::halfwidth_kana"));
+    assert!(codes("①").contains(&"aozora::proof::character::platform_dependent"));
+    assert!(codes("\u{0}").contains(&"aozora::proof::character::control"));
 }

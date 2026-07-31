@@ -1,11 +1,12 @@
 # aozora-proof-core
 
-The character-level proofreading engine for 青空文庫記法 (Aozora Bunko notation)
-text — the pure, WASM-clean library behind `aozora-proof`.
+Private, pure, WASM-compatible engine behind `aozora-proof`.
 
-It consumes the [`aozora`](https://github.com/P4suta/aozora) parser for the
-notation level and adds the character level (JIS X 0208 conformance,
-機種依存文字, 旧字体↔新字体, half/full-width, file structure), merging both into
-one unified, JSON-serialisable `Report`.
+It owns the bilingual Rule Catalog, official-requirement coverage,
+automatic/review/manual classification, explicit orthography policy,
+structured safe/review fixes, fixed-point safe application, and deterministic
+schema-v2 serialization. The `aozora` parser remains the authority for
+notation parsing and its `aozora::lex::*` diagnostics.
 
-See the [repository README](../../README.md) for the full picture.
+This crate is not a supported Rust API and is not published to crates.io. See
+the [architecture guide](../../ARCHITECTURE.md).

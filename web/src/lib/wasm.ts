@@ -6,20 +6,26 @@ type WasmModule = {
 	checkJson: (text: string) => string;
 	gaijiSearchJson: (query: string) => string;
 	ruleTitlesJson: () => string;
+	ruleCatalogJson: () => string;
 };
 
-export type Suggestion = {
-	replacement: string;
-	span: { start: number; end: number };
+export type FixAlternative = {
+	applicability: 'safe' | 'review';
 	label: string;
+	operation: string;
+	edit?: {
+		span: { start: number; end: number };
+		replacement: string;
+	};
 };
 
 export type Finding = {
 	code: string;
 	severity: string;
-	span: { start: number; end: number };
-	message: string;
-	suggestion?: Suggestion;
+	utf8ByteSpan: { start: number; end: number };
+	position: { line: number; column: number; endLine: number; endColumn: number };
+	canonicalMessage: string;
+	fixAlternatives: FixAlternative[];
 };
 
 export type GaijiMatch = { description: string; char: string; codepoint: string };
@@ -48,7 +54,7 @@ export function ensureReady(): Promise<void> {
 export function check(text: string): Finding[] {
 	if (!api) return [];
 	try {
-		return JSON.parse(api.checkJson(text)).data ?? [];
+		return JSON.parse(api.checkJson(text)).files?.[0]?.findings ?? [];
 	} catch {
 		return [];
 	}

@@ -11,26 +11,17 @@
 	let text = $state('①俱來髙');
 	let ready = $state(false);
 
-	// 1-based line number for a UTF-8 byte offset (the engine reports byte spans).
-	function lineOf(bytes: Uint8Array, byteOffset: number): number {
-		let line = 1;
-		const n = Math.min(byteOffset, bytes.length);
-		for (let i = 0; i < n; i++) if (bytes[i] === 0x0a) line += 1;
-		return line;
-	}
-
 	const findings = $derived.by(() => {
 		if (!ready) return [];
 		const data = check(text);
-		const bytes = new TextEncoder().encode(text);
 		data.sort(
 			(a, b) =>
 				(SEV[a.severity]?.order ?? 9) - (SEV[b.severity]?.order ?? 9) ||
-				a.span.start - b.span.start
+				a.utf8ByteSpan.start - b.utf8ByteSpan.start
 		);
 		return data.map((f) => ({
 			...f,
-			line: lineOf(bytes, f.span.start),
+			line: f.position.line,
 			title: ruleTitle(f.code)
 		}));
 	});
@@ -73,7 +64,7 @@
 						{SEV[f.severity]?.label ?? f.severity}
 					</span>
 					<span class="flex-none text-[0.85rem] tabular-nums text-muted">L{f.line}</span>
-					<span class="flex-1 basis-64">{f.message}</span>
+					<span class="flex-1 basis-64">{f.canonicalMessage}</span>
 					{#if f.title}
 						<span
 							class="flex-none rounded-md bg-line px-2 py-[0.05rem] text-[0.78rem] text-muted"
@@ -81,9 +72,11 @@
 							{f.title}
 						</span>
 					{/if}
-					{#if f.suggestion}
+					{#if f.fixAlternatives[0]}
 						<span class="w-full text-[0.85rem] text-muted">
-							↳ 提案: <span class="font-serif text-fg">{f.suggestion.label}</span>
+							↳ 提案: <span class="font-serif text-fg"
+								>{f.fixAlternatives[0].label}</span
+							>
 						</span>
 					{/if}
 				</li>

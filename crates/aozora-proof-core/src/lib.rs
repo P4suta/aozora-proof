@@ -1,22 +1,14 @@
-//! `aozora-proof-core` — the character-level proofreading engine for
-//! 青空文庫 (Aozora Bunko) text.
-//!
-//! The sibling [`aozora`] parser already covers the **notation level**
-//! (ruby, bouten, 外字 resolution, bracket pairing, structured
-//! diagnostics). This crate adds the **character level** — JIS X 0208
-//! conformance, 機種依存文字, 旧字体↔新字体, half/full-width, and
-//! file-structure checks — and merges both into one unified [`Report`].
-//!
-//! The engine is pure: it takes `&str` / `&[u8]` and returns
-//! [`Finding`]s. It performs no I/O, forbids `unsafe`, and is WASM-clean,
-//! so the same logic drives the CLI and the static web app.
+//! Pure proofreading engine shared by the CLI and WASM frontends.
 //!
 //! ```
-//! use aozora_proof_core::{run_notation, serialize_findings};
+//! use aozora_proof_core::{
+//!     Orthography, run_submission_with_orthography, serialize_report,
+//! };
 //!
-//! let findings = run_notation("｜青梅《おうめ》");
-//! let json = serialize_findings(&findings); // { "schema_version": 1, "data": [ … ] }
-//! assert!(json.starts_with("{\"schema_version\":1"));
+//! let report =
+//!     run_submission_with_orthography("青空\r\n".as_bytes(), Orthography::Mixed);
+//! let json = serialize_report(&report);
+//! assert!(json.starts_with(r#"{"schemaVersion":2"#));
 //! ```
 
 #![forbid(unsafe_code)]
@@ -24,20 +16,31 @@
     test,
     allow(
         clippy::indexing_slicing,
-        reason = "tests index results of asserted length"
+        reason = "tests index collections after asserting their shape"
     )
 )]
 
 pub mod finding;
-pub mod pipeline;
-pub mod rules;
-
+pub mod fix;
 pub mod gaiji_dict;
 pub mod kyuji;
 pub mod moji;
+pub mod orthography;
+pub mod pipeline;
+pub mod review;
+pub mod rules;
+pub mod submission;
+pub mod wire;
 
 pub use finding::{
-    Finding, FindingSource, Origin, SCHEMA_VERSION, Severity, Span, Suggestion, serialize_findings,
+    DetectionClass, Finding, FindingDetails, FindingSource, FixAlternative, FixApplicability,
+    FixOperation, Origin, Position, RuleCategory, SCHEMA_VERSION, Severity, Span, TextEdit,
+    position,
 };
-pub use pipeline::{Report, run_all, run_notation, run_submission};
-pub use rules::{RuleDoc, all_rules, explain};
+pub use fix::{FixError, SafeFixResult, apply_safe, apply_text_edits};
+pub use orthography::Orthography;
+pub use pipeline::{
+    Report, run_all, run_notation, run_submission, run_submission_with_orthography,
+};
+pub use rules::{OfficialItem, RuleDoc, all_rules, explain, official_items};
+pub use wire::{ReportFile, serialize_report, serialize_reports};

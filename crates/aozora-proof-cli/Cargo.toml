@@ -21,10 +21,16 @@ aozora-proof-core     = { workspace = true }
 anstyle               = { workspace = true }
 clap                  = { workspace = true }
 clap_complete         = { workspace = true }
+clap_mangen           = { workspace = true }
+crossterm             = { workspace = true }
 notify                = { workspace = true }
 notify-debouncer-mini = { workspace = true }
+ratatui               = { workspace = true }
 serde                 = { workspace = true }
 serde_json            = { workspace = true }
+similar               = { workspace = true }
+tempfile              = { workspace = true }
+toml                  = { workspace = true }
 
 [lints]
 workspace = true

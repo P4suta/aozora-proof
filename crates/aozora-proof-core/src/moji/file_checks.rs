@@ -1,112 +1,89 @@
-//! File-structure checks over the **raw** input bytes.
-//!
-//! These are document-level findings (their span is the zero-width marker at
-//! byte 0), distinct from the per-character scan in the parent module, which
-//! works on decoded text.
+//! Raw-byte submission checks and detected file metadata.
 
-use aozora::has_utf8_bom;
 use std::str::from_utf8;
 
-use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
+use aozora::has_utf8_bom;
 
-/// Stable finding codes for file-structure checks.
-pub mod codes {
-    /// A UTF-8 BOM is present at the start of the file.
-    pub const UTF8_BOM: &str = "aozora::char::utf8_bom";
-    /// Line endings are not CR+LF (青空文庫 submission convention).
-    pub const CRLF_EXPECTED: &str = "aozora::char::crlf_expected";
-    /// More than one line-ending convention occurs in the file.
-    pub const MIXED_LINE_ENDINGS: &str = "aozora::char::mixed_line_endings";
-    /// A non-ASCII source is UTF-8 rather than submission-format Shift_JIS.
-    pub const UTF8_SOURCE: &str = "aozora::char::utf8_source";
-    /// The bytes decode as neither UTF-8 nor `Shift_JIS`.
-    pub const INVALID_ENCODING: &str = "aozora::char::invalid_encoding";
-}
+use crate::finding::{
+    Finding, FindingDetails, FixAlternative, FixApplicability, FixOperation, Origin, Span,
+};
+use crate::rules::codes;
 
-/// Document-level marker span (zero-width at the file start).
-const DOC: Span = Span { start: 0, end: 0 };
+const DOCUMENT: Span = Span { start: 0, end: 0 };
 
-/// Run file-structure checks over the raw input bytes.
-#[must_use]
-pub fn check(raw: &[u8]) -> Vec<Finding> {
-    let mut findings = Vec::new();
-
-    if has_utf8_bom(raw) {
-        findings.push(Finding {
-            code: codes::UTF8_BOM,
-            severity: Severity::Warning,
-            origin: Origin::Character,
-            source: FindingSource::Source,
-            span: DOC,
-            message: "先頭に UTF-8 BOM があります。青空文庫テキストには BOM を含めません。"
-                .to_owned(),
-            codepoint: None,
-            suggestion: None,
-        });
-    }
-
-    match line_endings(raw) {
-        LineEndings::None | LineEndings::CrLf => {}
-        LineEndings::Lf => findings.push(line_ending_finding(
-            codes::CRLF_EXPECTED,
-            "改行が LF です。青空文庫の提出形式は CR+LF です。",
-        )),
-        LineEndings::Cr => findings.push(line_ending_finding(
-            codes::CRLF_EXPECTED,
-            "改行が CR です。青空文庫の提出形式は CR+LF です。",
-        )),
-        LineEndings::Mixed => findings.push(line_ending_finding(
-            codes::MIXED_LINE_ENDINGS,
-            "複数の改行形式が混在しています。青空文庫の提出形式は CR+LF です。",
-        )),
-    }
-
-    findings
-}
-
-/// Submission-only encoding checks.
-#[must_use]
-pub fn check_submission(raw: &[u8]) -> Vec<Finding> {
-    if from_utf8(raw).is_ok() && raw.iter().any(|byte| !byte.is_ascii()) {
-        vec![Finding {
-            code: codes::UTF8_SOURCE,
-            severity: Severity::Note,
-            origin: Origin::Character,
-            source: FindingSource::Source,
-            span: DOC,
-            message: "入力は UTF-8 です。青空文庫へ提出するファイルは Shift_JIS で保存します。"
-                .to_owned(),
-            codepoint: None,
-            suggestion: None,
-        }]
-    } else {
-        Vec::new()
-    }
-}
-
-fn line_ending_finding(code: &'static str, message: &str) -> Finding {
-    Finding {
-        code,
-        severity: Severity::Note,
-        origin: Origin::Character,
-        source: FindingSource::Source,
-        span: DOC,
-        message: message.to_owned(),
-        codepoint: None,
-        suggestion: None,
-    }
-}
-
+/// Detected source encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LineEndings {
+pub enum DetectedEncoding {
+    /// ASCII-only bytes, valid in both supported encodings.
+    Ascii,
+    /// UTF-8.
+    Utf8,
+    /// Shift_JIS.
+    ShiftJis,
+    /// Neither supported encoding.
+    Unknown,
+}
+
+impl DetectedEncoding {
+    /// Canonical machine identifier.
+    #[must_use]
+    pub const fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::Ascii => "ascii",
+            Self::Utf8 => "utf-8",
+            Self::ShiftJis => "shift_jis",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Detected line-ending convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnding {
+    /// No line ending occurs.
     None,
+    /// CRLF only.
     CrLf,
+    /// LF only.
     Lf,
+    /// CR only.
     Cr,
+    /// More than one convention.
     Mixed,
 }
 
-fn line_endings(raw: &[u8]) -> LineEndings {
+impl LineEnding {
+    /// Canonical machine identifier.
+    #[must_use]
+    pub const fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::CrLf => "crlf",
+            Self::Lf => "lf",
+            Self::Cr => "cr",
+            Self::Mixed => "mixed",
+        }
+    }
+}
+
+/// Detect the source encoding without lossy replacement.
+#[must_use]
+pub fn detect_encoding(raw: &[u8]) -> DetectedEncoding {
+    let without_bom = raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(raw);
+    if without_bom.is_ascii() {
+        DetectedEncoding::Ascii
+    } else if from_utf8(without_bom).is_ok() {
+        DetectedEncoding::Utf8
+    } else if aozora::decode_auto(raw).is_ok() {
+        DetectedEncoding::ShiftJis
+    } else {
+        DetectedEncoding::Unknown
+    }
+}
+
+/// Detect the line-ending convention.
+#[must_use]
+pub fn detect_line_ending(raw: &[u8]) -> LineEnding {
     let mut crlf = false;
     let mut lf = false;
     let mut cr = false;
@@ -129,12 +106,109 @@ fn line_endings(raw: &[u8]) -> LineEndings {
         }
     }
     match (crlf, lf, cr) {
-        (false, false, false) => LineEndings::None,
-        (true, false, false) => LineEndings::CrLf,
-        (false, true, false) => LineEndings::Lf,
-        (false, false, true) => LineEndings::Cr,
-        _ => LineEndings::Mixed,
+        (false, false, false) => LineEnding::None,
+        (true, false, false) => LineEnding::CrLf,
+        (false, true, false) => LineEnding::Lf,
+        (false, false, true) => LineEnding::Cr,
+        _ => LineEnding::Mixed,
     }
+}
+
+/// Run format checks that apply to every decoded document.
+#[must_use]
+pub fn check(raw: &[u8]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    if has_utf8_bom(raw) {
+        findings.push(file_finding(
+            codes::BOM,
+            (
+                "The source starts with a UTF-8 byte-order mark.",
+                "ファイル先頭に UTF-8 BOM があります。",
+            ),
+            (
+                FixOperation::RemoveBom,
+                "Remove the byte-order mark",
+                "BOM を削除",
+            ),
+        ));
+    }
+
+    let ending = detect_line_ending(raw);
+    if !matches!(ending, LineEnding::None | LineEnding::CrLf) {
+        let mut finding = file_finding(
+            codes::LINE_ENDING,
+            (
+                "Line endings are not consistently CRLF.",
+                "改行コードが CRLF に統一されていません。",
+            ),
+            (
+                FixOperation::NormalizeCrLf,
+                "Normalize line endings to CRLF",
+                "改行を CRLF に統一",
+            ),
+        );
+        finding
+            .data
+            .insert("detected".to_owned(), ending.as_wire_str().to_owned());
+        findings.push(finding);
+    }
+
+    findings
+}
+
+/// Run checks required specifically for a submission artifact.
+#[must_use]
+pub fn check_submission(raw: &[u8]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    if detect_encoding(raw) == DetectedEncoding::Utf8 {
+        findings.push(file_finding(
+            codes::SOURCE_ENCODING,
+            (
+                "The submission source is UTF-8 rather than Shift_JIS.",
+                "提出ファイルが Shift_JIS ではなく UTF-8 です。",
+            ),
+            (
+                FixOperation::EncodeShiftJis,
+                "Encode losslessly as Shift_JIS",
+                "Shift_JIS へ無損失変換",
+            ),
+        ));
+    }
+    if !raw.is_empty() && !raw.ends_with(b"\n") && !raw.ends_with(b"\r") {
+        findings.push(file_finding(
+            codes::FINAL_NEWLINE,
+            (
+                "The document has no final line ending.",
+                "文書末尾に改行がありません。",
+            ),
+            (
+                FixOperation::EnsureFinalNewline,
+                "Add the final line ending",
+                "末尾改行を追加",
+            ),
+        ));
+    }
+    findings
+}
+
+fn file_finding(
+    code: &'static str,
+    messages: (&str, &str),
+    fix: (FixOperation, &str, &str),
+) -> Finding {
+    Finding::from_rule(
+        code,
+        Origin::Character,
+        DOCUMENT,
+        FindingDetails::new(messages.0.to_owned(), messages.1.to_owned()).with_fixes(vec![
+            FixAlternative {
+                applicability: FixApplicability::Safe,
+                label: fix.1.to_owned(),
+                label_ja: fix.2.to_owned(),
+                operation: fix.0,
+            },
+        ]),
+    )
 }
 
 #[cfg(test)]
@@ -142,44 +216,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_utf8_bom() {
-        let f = check("\u{feff}あ".as_bytes());
-        assert!(f.iter().any(|x| x.code == codes::UTF8_BOM));
+    fn detects_encoding_and_line_endings() {
+        assert_eq!(detect_encoding("青空".as_bytes()), DetectedEncoding::Utf8);
+        assert_eq!(detect_encoding(b"plain"), DetectedEncoding::Ascii);
+        assert_eq!(detect_line_ending(b"a\r\nb"), LineEnding::CrLf);
+        assert_eq!(detect_line_ending(b"a\r\nb\n"), LineEnding::Mixed);
     }
 
     #[test]
-    fn pure_line_endings_are_distinguished() {
+    fn format_findings_have_safe_operations() {
+        let findings = check(b"a\nb");
         assert!(
-            check(b"a\nb")
+            findings
                 .iter()
-                .any(|x| x.code == codes::CRLF_EXPECTED)
+                .any(|finding| finding.code == codes::LINE_ENDING)
         );
-        assert!(
-            check(b"a\rb")
+        assert!(findings.iter().all(|finding| {
+            finding
+                .fixes
                 .iter()
-                .any(|x| x.code == codes::CRLF_EXPECTED)
-        );
-        assert!(
-            !check(b"a\r\nb")
-                .iter()
-                .any(|x| x.code == codes::CRLF_EXPECTED)
-        );
-    }
-
-    #[test]
-    fn mixed_line_endings_have_their_own_code() {
-        let findings = check(b"a\r\nb\nc\rd");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].code, codes::MIXED_LINE_ENDINGS);
-    }
-
-    #[test]
-    fn submission_check_distinguishes_utf8_from_ascii() {
-        assert!(
-            check_submission("青空".as_bytes())
-                .iter()
-                .any(|finding| finding.code == codes::UTF8_SOURCE)
-        );
-        assert!(check_submission(b"ASCII only").is_empty());
+                .all(|fix| fix.applicability == FixApplicability::Safe)
+        }));
     }
 }

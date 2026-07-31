@@ -11,8 +11,5 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "※［＃「謎の字」、第3水準9-9-9］".to_owned());
     let report = aozora_proof_core::run_all(text.as_bytes());
-    println!(
-        "{}",
-        aozora_proof_core::serialize_findings(&report.findings)
-    );
+    println!("{}", aozora_proof_core::serialize_report(&report));
 }
