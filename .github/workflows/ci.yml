@@ -46,7 +46,7 @@ jobs:
       - name: typos
         uses: crate-ci/typos@master
       - name: lint tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.3
         with:
           tool: taplo@0.10.0, shellcheck@0.11.0
       - name: install actionlint
@@ -106,7 +106,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 11
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
