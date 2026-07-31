@@ -5,10 +5,10 @@
 //! character once (so e.g. `①` is reported as 機種依存, not also as 第3水準),
 //! emitting `aozora::char::*` findings in decoded byte coordinates:
 //!
-//! 1. half-width katakana (JIS X 0201) — banned outright;
-//! 2. 機種依存文字 (CP932 ∖ JIS X 0208) — non-portable, needs 外字注記;
-//! 3. 第3/第4水準 (JIS X 0213) — needs 外字注記;
-//! 4. outside JIS X 0213 entirely — needs 外字注記 / substitute.
+//! 1. controls — tabs and form feeds receive actionable codes;
+//! 2. half-width kana letters and punctuation (JIS X 0201);
+//! 3. 機種依存文字 (CP932 ∖ JIS X 0208);
+//! 4. 第3/第4水準 and characters outside JIS X 0213.
 //!
 //! ASCII is intentionally not flagged here (half/full-width handling is a
 //! separate concern). File-structure checks (BOM, line endings, encoding)
@@ -24,6 +24,8 @@ use crate::finding::{Finding, FindingSource, Origin, Severity, Span};
 pub mod codes {
     /// Half-width katakana (JIS X 0201) used where full-width is required.
     pub const HALFWIDTH_KATAKANA: &str = "aozora::char::halfwidth_katakana";
+    /// Half-width punctuation from the JIS X 0201 kana block.
+    pub const HALFWIDTH_KANA_PUNCTUATION: &str = "aozora::char::halfwidth_kana_punctuation";
     /// 機種依存文字 — encodable in CP932 but outside JIS X 0208.
     pub const PLATFORM_DEPENDENT: &str = "aozora::char::platform_dependent";
     /// JIS X 0213 第3/第4水準 — representable only via 外字注記.
@@ -32,36 +34,47 @@ pub mod codes {
     pub const NOT_IN_JISX0213: &str = "aozora::char::not_in_jisx0213";
     /// A forbidden C0/DEL control character.
     pub const CONTROL_CHARACTER: &str = "aozora::char::control_character";
+    /// A literal tab character.
+    pub const TAB_CHARACTER: &str = "aozora::char::tab_character";
+    /// A literal form-feed character.
+    pub const FORM_FEED_CHARACTER: &str = "aozora::char::form_feed_character";
 }
 
 /// The single classification a non-conformant character receives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CharIssue {
     HalfwidthKatakana,
+    HalfwidthKanaPunctuation,
     PlatformDependent,
     NeedsGaijiChuki,
     NotInJisX0213,
     ControlCharacter,
+    TabCharacter,
+    FormFeedCharacter,
 }
 
 impl CharIssue {
     const fn code(self) -> &'static str {
         match self {
             Self::HalfwidthKatakana => codes::HALFWIDTH_KATAKANA,
+            Self::HalfwidthKanaPunctuation => codes::HALFWIDTH_KANA_PUNCTUATION,
             Self::PlatformDependent => codes::PLATFORM_DEPENDENT,
             Self::NeedsGaijiChuki => codes::NEEDS_GAIJI_CHUKI,
             Self::NotInJisX0213 => codes::NOT_IN_JISX0213,
             Self::ControlCharacter => codes::CONTROL_CHARACTER,
+            Self::TabCharacter => codes::TAB_CHARACTER,
+            Self::FormFeedCharacter => codes::FORM_FEED_CHARACTER,
         }
     }
 
     const fn severity(self) -> Severity {
         match self {
-            // Outright bans / non-portable: hard errors.
-            Self::HalfwidthKatakana | Self::PlatformDependent | Self::ControlCharacter => {
-                Severity::Error
-            }
-            // Representable, but only as 外字注記: warn.
+            Self::HalfwidthKatakana
+            | Self::HalfwidthKanaPunctuation
+            | Self::PlatformDependent
+            | Self::ControlCharacter
+            | Self::TabCharacter
+            | Self::FormFeedCharacter => Severity::Error,
             Self::NeedsGaijiChuki | Self::NotInJisX0213 => Severity::Warning,
         }
     }
@@ -70,6 +83,9 @@ impl CharIssue {
         match self {
             Self::HalfwidthKatakana => {
                 format!("半角カタカナ「{c}」は使用できません。全角に変換してください。")
+            }
+            Self::HalfwidthKanaPunctuation => {
+                format!("半角カナ用約物「{c}」は使用できません。対応する全角記号に変換してください。")
             }
             Self::PlatformDependent => format!(
                 "機種依存文字「{c}」は使用できません。外字注記（※［＃…］）に置き換えてください。"
@@ -83,21 +99,36 @@ impl CharIssue {
             Self::ControlCharacter => {
                 format!("制御文字 U+{:04X} は本文に使用できません。", u32::from(c))
             }
+            Self::TabCharacter => {
+                "タブ文字は本文に使用できません。底本の配置を確認し、文字または青空文庫注記で表現してください。"
+                    .to_owned()
+            }
+            Self::FormFeedCharacter => {
+                "改ページ制御文字は本文に使用できません。［＃改ページ］などの青空文庫注記で表現してください。"
+                    .to_owned()
+            }
         }
     }
 }
 
 /// Classify a single character, or `None` if it is conformant (or ASCII).
 fn classify(c: char) -> Option<CharIssue> {
+    if c == '\t' {
+        return Some(CharIssue::TabCharacter);
+    }
+    if c == '\u{000C}' {
+        return Some(CharIssue::FormFeedCharacter);
+    }
     if matches!(c, '\u{0000}'..='\u{001F}' | '\u{007F}') && !matches!(c, '\r' | '\n') {
         return Some(CharIssue::ControlCharacter);
     }
     if c.is_ascii() {
         return None;
     }
-    // Half-width katakana (U+FF61..=U+FF9F) — checked before the CP932 test,
-    // since these also round-trip through Shift_JIS.
-    if ('\u{FF61}'..='\u{FF9F}').contains(&c) {
+    if ('\u{FF61}'..='\u{FF65}').contains(&c) {
+        return Some(CharIssue::HalfwidthKanaPunctuation);
+    }
+    if ('\u{FF66}'..='\u{FF9F}').contains(&c) {
         return Some(CharIssue::HalfwidthKatakana);
     }
     if is_platform_dependent(c) {
@@ -140,10 +171,21 @@ mod tests {
 
     #[test]
     fn flags_halfwidth_katakana() {
-        let f = check("\u{FF71}"); // ｱ
+        let f = check("\u{FF71}");
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].code, codes::HALFWIDTH_KATAKANA);
         assert_eq!(f[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn distinguishes_halfwidth_kana_punctuation() {
+        let findings = check("\u{FF62}\u{FF65}\u{FF63}");
+        assert_eq!(findings.len(), 3);
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.code == codes::HALFWIDTH_KANA_PUNCTUATION)
+        );
     }
 
     #[test]
@@ -163,14 +205,12 @@ mod tests {
     }
 
     #[test]
-    fn flags_control_characters_but_not_line_endings() {
-        let findings = check("a\tb\u{7f}c\r\n");
-        assert_eq!(findings.len(), 2);
-        assert!(
-            findings
-                .iter()
-                .all(|finding| finding.code == codes::CONTROL_CHARACTER)
-        );
+    fn distinguishes_actionable_control_characters() {
+        let findings = check("a\tb\u{000C}c\u{007F}d\r\n");
+        assert_eq!(findings.len(), 3);
+        assert_eq!(findings[0].code, codes::TAB_CHARACTER);
+        assert_eq!(findings[1].code, codes::FORM_FEED_CHARACTER);
+        assert_eq!(findings[2].code, codes::CONTROL_CHARACTER);
     }
 
     #[test]

@@ -38,10 +38,21 @@ const CHAR_CASES: &[(&str, &str, &[&str])] = &[
         "a\r\nb\nc",
         &["aozora::char::mixed_line_endings"],
     ),
+    ("tab_character", "a\tb", &["aozora::char::tab_character"]),
+    (
+        "form_feed_character",
+        "a\u{000C}b",
+        &["aozora::char::form_feed_character"],
+    ),
     (
         "control_character",
-        "a\tb",
+        "a\u{007F}b",
         &["aozora::char::control_character"],
+    ),
+    (
+        "halfwidth_kana_punctuation",
+        "\u{FF62}",
+        &["aozora::char::halfwidth_kana_punctuation"],
     ),
     (
         "kyuji",

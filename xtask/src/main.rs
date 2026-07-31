@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use aozora_proof_core::{FindingSource, run_submission};
 use serde::Serialize;
 
-const AUDIT_SCHEMA_VERSION: u32 = 1;
+const AUDIT_SCHEMA_VERSION: u32 = 2;
 const DEFAULT_SAMPLES: usize = 5;
 
 #[derive(Debug)]
@@ -39,6 +39,8 @@ struct RuleStats {
     severity: String,
     findings: u64,
     files: u64,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    codepoints: BTreeMap<String, u64>,
     samples: Vec<String>,
 }
 
@@ -152,6 +154,7 @@ fn run(args: Args) -> Result<PathBuf, String> {
                 .as_wire_str()
                 .clone_into(&mut stats.severity);
             stats.findings += 1;
+            record_codepoint(stats, finding.codepoint);
             if file_codes.insert(finding.code) {
                 stats.files += 1;
                 if stats.samples.len() < args.samples {
@@ -185,6 +188,19 @@ fn run(args: Args) -> Result<PathBuf, String> {
         .map_err(|error| format!("could not serialize audit: {error}"))?;
     fs::write(&args.output, json).map_err(|error| format!("{}: {error}", args.output.display()))?;
     Ok(args.output)
+}
+
+fn codepoint_key(character: char) -> String {
+    format!("U+{:04X}", u32::from(character))
+}
+
+fn record_codepoint(stats: &mut RuleStats, codepoint: Option<char>) {
+    if let Some(character) = codepoint {
+        *stats
+            .codepoints
+            .entry(codepoint_key(character))
+            .or_default() += 1;
+    }
 }
 
 fn collect_text_files(directory: &Path, paths: &mut Vec<PathBuf>) -> io::Result<()> {
@@ -334,5 +350,11 @@ mod tests {
             merge_spans(vec![(1, 3), (2, 4), (4, 6), (8, 9)]),
             vec![(1, 6), (8, 9)]
         );
+    }
+
+    #[test]
+    fn codepoint_keys_are_stable_and_visible() {
+        assert_eq!(codepoint_key('\t'), "U+0009");
+        assert_eq!(codepoint_key('Ⅰ'), "U+2160");
     }
 }
