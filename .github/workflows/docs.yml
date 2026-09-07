@@ -47,7 +47,7 @@ jobs:
           tools: wasm-pack@0.15.0
       - name: Build wasm package (→ web/src/lib/pkg)
         run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/src/lib/pkg
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 11.18.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -85,4 +85,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
