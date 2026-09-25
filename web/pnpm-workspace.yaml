@@ -8,4 +8,4 @@ overrides:
   brace-expansion: 5.0.8
   cookie: '^0.7.0'
   devalue: 5.8.2
-  postcss: 8.5.18
+  postcss: 8.5.23
