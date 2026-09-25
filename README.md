@@ -129,7 +129,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-  - uses: P4suta/aozora-proof/action@v0.1.0
+  - uses: P4suta/aozora-proof/action@v0.1.1
     with:
       files: "**/*.txt"
       orthography: mixed
