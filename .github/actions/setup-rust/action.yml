@@ -22,7 +22,7 @@ runs:
       with:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
-    - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+    - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
     - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
     - if: ${{ inputs.tools != '' }}
       uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
