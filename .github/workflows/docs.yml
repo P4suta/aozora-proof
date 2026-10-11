@@ -49,10 +49,10 @@ jobs:
         run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/src/lib/pkg
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
-          version: 11.18.0
+          version: 11.28.5
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: 24.21.0
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install web deps

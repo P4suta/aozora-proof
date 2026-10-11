@@ -57,9 +57,9 @@ jobs:
       - name: release contract
         run: cargo run --locked -p xtask -- release check
       - name: typos
-        uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89 # v1.47.2
+        uses: crate-ci/typos@7f9d0819ca1c008ade73f4b41fa9d258d48f605b # v1.51.1
       - name: lint tools
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: taplo@0.10.0, shellcheck@0.11.0
       - name: install actionlint
@@ -118,10 +118,10 @@ jobs:
         run: wasm-pack build --target web --release crates/aozora-proof-wasm --out-dir ../../web/src/lib/pkg
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
-          version: 11.18.0
+          version: 11.28.5
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: 24.21.0
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install web deps

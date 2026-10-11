@@ -5,12 +5,12 @@
 # Rust + cargo-built plugins live in .config/mise/config.toml; mise reads
 # both files and merges the [tools] tables.
 [tools]
-just                        = "1.53.0"
-lefthook                    = "2.1.9"
-"github:crate-ci/typos"     = "1.47.2"
+just                        = "1.58.0"
+lefthook                    = "2.2.0"
+"github:crate-ci/typos"     = "v1.51.1"
 "github:crate-ci/committed" = "1.1.11"
 actionlint                  = "1.7.12"
 shellcheck                  = "0.11.0"
 # web/ is a SvelteKit app (see `just lint-web`).
-node = "24.16.0"
-pnpm = "11.18.0"
+node = "24.21.0"
+pnpm = "11.28.5"
