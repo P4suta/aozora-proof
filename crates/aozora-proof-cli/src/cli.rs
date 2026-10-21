@@ -172,12 +172,16 @@ pub(crate) enum SeverityArg {
     Note,
 }
 
+const ERROR_SEVERITY_RANK: u8 = 3;
+const WARNING_SEVERITY_RANK: u8 = 2;
+const NOTE_SEVERITY_RANK: u8 = 1;
+
 impl SeverityArg {
     pub(crate) const fn rank(self) -> u8 {
         match self {
-            Self::Error => 3,
-            Self::Warning => 2,
-            Self::Note => 1,
+            Self::Error => ERROR_SEVERITY_RANK,
+            Self::Warning => WARNING_SEVERITY_RANK,
+            Self::Note => NOTE_SEVERITY_RANK,
         }
     }
 }
