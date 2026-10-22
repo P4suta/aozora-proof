@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { check, ensureReady, ruleTitle } from '$lib/wasm';
+	import { check, ensureReady, ruleTitle } from '#lib/wasm.js';
 
 	const SEV: Record<string, { order: number; label: string; badge: string }> = {
 		error: { order: 0, label: 'エラー', badge: 'bg-error' },

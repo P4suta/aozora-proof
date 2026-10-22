@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ensureReady, searchGaiji } from '$lib/wasm';
+	import { ensureReady, searchGaiji } from '#lib/wasm.js';
 
 	let query = $state('');
 	let ready = $state(false);
