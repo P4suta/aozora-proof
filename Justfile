@@ -1,6 +1,8 @@
 # aozora-proof — host-cargo dev commands. `just --list` shows them all.
 set shell := ["bash", "-c"]
 
+fuzz_nightly := `sed -n 's/.*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' fuzz/rust-toolchain.toml`
+
 default:
     @just --list
 
@@ -75,7 +77,7 @@ test-portable *ARGS:
 # Mirrors the fixed parser exploration in fuzz.yml.
 fuzz target="run_all":
     cargo metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
-    cargo +nightly-2026-07-15 fuzz run {{ target }} --target x86_64-unknown-linux-gnu -- -runs=10000 -seed=1
+    cargo +{{quote(fuzz_nightly)}} fuzz run {{ target }} --target x86_64-unknown-linux-gnu -- -runs=10000 -seed=1
 
 # auto-format Rust, TOML, and web assets (taplo/pnpm skipped if not installed).
 fmt:

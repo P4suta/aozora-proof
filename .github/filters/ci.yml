@@ -2,6 +2,7 @@ rust:
   - '**/*.rs'
   - '**/Cargo.toml'
   - '**/Cargo.lock'
+  - 'fuzz/**'
   - '.cargo/**'
   - '.config/mise/**'
   - '.github/**'

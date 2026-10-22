@@ -18,8 +18,15 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@f133eefe930d61f0d9371efd474daf0125ed3dd1 # 1.95.0
+    - id: pin
+      shell: bash
+      run: |
+        toolchain=$(sed -n 's/.*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+        [[ "$toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+    - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
       with:
+        toolchain: ${{ steps.pin.outputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
     - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
