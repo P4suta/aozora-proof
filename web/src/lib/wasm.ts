@@ -1,13 +1,7 @@
 // Browser-only bridge to the wasm-pack build. The wasm module is imported
 // dynamically inside ensureReady() so it never loads during prerender (SSR),
 // and the checks only run client-side after init() resolves.
-type WasmModule = {
-	default: (module_or_path?: unknown) => Promise<unknown>;
-	checkJson: (text: string) => string;
-	gaijiSearchJson: (query: string) => string;
-	ruleTitlesJson: () => string;
-	ruleCatalogJson: () => string;
-};
+type WasmModule = typeof import('#lib/pkg/aozora_proof_wasm.js');
 
 export type FixAlternative = {
 	applicability: 'safe' | 'review';
@@ -45,7 +39,7 @@ let titles: Record<string, string> = {};
 export function ensureReady(): Promise<void> {
 	if (!readyPromise) {
 		readyPromise = (async () => {
-			const mod = (await import('$lib/pkg/aozora_proof_wasm.js')) as unknown as WasmModule;
+			const mod = await import('#lib/pkg/aozora_proof_wasm.js');
 			await mod.default();
 			api = mod;
 			titles = JSON.parse(mod.ruleTitlesJson());
