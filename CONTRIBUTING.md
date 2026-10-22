@@ -1,20 +1,17 @@
 # Contributing to aozora-proof
 
-Thanks for your interest! This is a small, focused FOSS project; contributions
-of all sizes are welcome.
+Thanks for your interest!
+This is a small, focused FOSS project; contributions of all sizes are welcome.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
 
 ## Ground rules
 
-- **Host toolchain.** Everything runs on host `cargo` — no Docker required. The
-  toolchain is pinned by [`rust-toolchain.toml`](./rust-toolchain.toml) (1.95.0).
-- **No warning suppressions.** An `#[allow(...)]` needs a `reason = "…"`; CI runs
-  clippy with `-D warnings`.
-- **The notation level belongs upstream.** `aozora-proof` consumes the
-  [`aozora`](https://github.com/P4suta/aozora) parser (from crates.io)
-  for ruby / bouten / 外字 resolution / diagnostics. Parser changes land there,
-  not here; this repo owns the **character level** only.
+- **Host toolchain.** Everything runs on host `cargo` — no Docker required.
+  The toolchain is pinned by [`rust-toolchain.toml`](./rust-toolchain.toml).
+- **No warning suppressions.** An `#[allow(...)]` needs a `reason = "…"`; CI runs clippy with `-D warnings`.
+- **The notation level belongs upstream.** `aozora-proof` consumes the [`aozora`](https://github.com/P4suta/aozora) parser (from crates.io) for ruby / bouten / 外字 resolution / diagnostics.
+  Parser changes land there, not here; this repo owns the **character level** only.
 - **Conventional Commits**, enforced by the `commit-msg` hook.
 
 ## Setup
@@ -26,12 +23,11 @@ $ ./bootstrap.sh      # installs the exact mise.lock tool set, then runs setup
 $ just doctor         # verify your toolchain + tools match what CI pins
 ```
 
-Already have `mise` and `just`? `just setup` alone does the same. The pieces are also
-available individually: `just setup-toolchain`, `just setup-tools`, `just hooks`.
-Tool versions and download checksums are pinned by [`mise.toml`](./mise.toml),
-`.config/mise/config.toml`, and their `mise.lock` files; CI uses the same
-versions. The web app (`web/`) is a SvelteKit project provisioned with Node and
-pnpm by mise.
+Already have `mise` and `just`?
+`just setup` alone does the same.
+The pieces are also available individually: `just setup-toolchain`, `just setup-tools`, `just hooks`.
+Tool versions and download checksums are pinned by [`mise.toml`](./mise.toml), `.config/mise/config.toml`, and their `mise.lock` files; CI uses the same versions.
+The web app (`web/`) is a SvelteKit project provisioned with Node and pnpm by mise.
 
 ## Development loop
 
@@ -41,31 +37,26 @@ $ just test           # tests + doctests (nextest when present, like CI)
 $ just clippy         # -D warnings, like CI
 $ just fmt            # auto-format
 $ just ci             # everything CI's gating jobs run
-$ just ci-full        # + the coverage job (full CI parity)
+$ just ci-full        # + optional coverage diagnostics
 ```
 
-`just --list` shows every recipe. `bacon` (`bacon` / `bacon clippy` /
-`bacon nextest`) gives a fast watch loop. `just doctor` reports whether your
-local tools match the versions CI pins.
+`just --list` shows every recipe.
+`bacon` (`bacon` / `bacon clippy` / `bacon nextest`) gives a fast watch loop.
+`just doctor` reports whether your local tools match the versions CI pins.
 
-Hacking on the **web app**? After `pnpm -C web install`, `just serve` builds the
-WASM package and runs the SvelteKit dev server at <http://localhost:5173>; `just
-web` adds a watcher that rebuilds the WASM on Rust changes. `just lint-web` runs
-the full web gate (prettier + eslint + svelte-check + prerender build).
+Hacking on the **web app**?
+After `pnpm -C web install`, `just serve` builds the WASM package and runs the SvelteKit dev server at <http://localhost:5173>; `just web` adds a watcher that rebuilds the WASM on Rust changes.
+`just lint-web` runs the full web gate (prettier + eslint + svelte-check + prerender build).
 
 ## Troubleshooting
 
-- **clippy/fmt passes locally but fails in CI** — your `rustc` may differ from
-  the pinned channel. Run `just doctor`; `rustup show` re-syncs to
-  `rust-toolchain.toml` (unset `RUSTUP_TOOLCHAIN` if it is set).
-- **`typos` flags a domain term** — add it to `_typos.toml` under
-  `[default.extend-words]`.
-- **`mold: linker not found`** — mold is optional (see `.cargo/config.toml`);
-  unset the linker `RUSTFLAGS` or install mold.
-- **Can't reproduce a CI failure locally** — `just ci-full` runs every CI job
-  (nextest + lint + deny + coverage) in one shot.
-- **web app blank / "module" error** — run it through the dev server, not
-  `file://`: `pnpm -C web install` then `just serve` (Vite dev) or `just web`.
+- **clippy/fmt passes locally but fails in CI** — your `rustc` may differ from the pinned channel.
+  Run `just doctor`; `rustup show` re-syncs to `rust-toolchain.toml` (unset `RUSTUP_TOOLCHAIN` if it is set).
+- **`typos` flags a domain term** — add it to `_typos.toml` under `[default.extend-words]`.
+- **`mold: linker not found`** — mold is optional (see `.cargo/config.toml`); unset the linker `RUSTFLAGS` or install mold.
+- **Can't reproduce a CI failure locally** — `just ci` runs the routine Rust and web checks.
+  Coverage and fixed-seed parser exploration run for the exact release candidate after a version change reaches main.
+- **web app blank / "module" error** — run it through the dev server, not `file://`: `pnpm -C web install` then `just serve` (Vite dev) or `just web`.
 
 ## Pull requests
 

@@ -102,11 +102,11 @@ fn gaiji_layer_suggests_a_chuki_for_a_needs_chuki_char() {
             edit.replacement
         );
         assert!(edit.replacement.contains("第3水準1-4-84"));
-        assert!(
+        assert_eq!(
             run_all(edit.replacement.as_bytes())
                 .expect("suggestion checks")
-                .findings
-                .is_empty()
+                .findings,
+            []
         );
     }
 }

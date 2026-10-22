@@ -72,9 +72,10 @@ test-portable *ARGS:
     cargo test --workspace --doc
 
 # run a libFuzzer target (needs nightly + cargo-fuzz; see fuzz/).
-# e.g. `just fuzz run_all 120` or `just fuzz gaiji`. Mirrors fuzz.yml.
-fuzz target="run_all" secs="60":
-    cargo +nightly-2026-07-15 fuzz run {{ target }} -- -max_total_time={{ secs }}
+# Mirrors the fixed parser exploration in fuzz.yml.
+fuzz target="run_all":
+    cargo metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
+    cargo +nightly-2026-07-15 fuzz run {{ target }} --target x86_64-unknown-linux-gnu -- -runs=10000 -seed=1
 
 # auto-format Rust, TOML, and web assets (taplo/pnpm skipped if not installed).
 fmt:
@@ -121,13 +122,13 @@ cov:
     cargo llvm-cov report --summary-only
     @echo "cov: lcov.info + target/llvm-cov/html written"
 
-# everything CI's gating jobs run (test + lint + deny). Mirrors ci.yml.
+# The routine gate covers Rust and web checks; hosted CI selects affected jobs.
 ci: release-check fmt-check rust-policy clippy test doc deny typos lint-toml lint-actions lint-web
-    @echo "ci: gating checks passed (use 'just ci-full' to also run the coverage job)"
+    @echo "ci: routine checks passed"
 
-# full CI parity — also reproduces the coverage job (ci.yml `coverage`).
+# Coverage is an explicit diagnostic and part of candidate assurance.
 ci-full: ci cov
-    @echo "ci-full: all CI jobs reproduced locally"
+    @echo "ci-full: routine checks and coverage passed"
 
 # Native release gate for the generated reference assets.
 ci-release:

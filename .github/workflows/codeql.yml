@@ -1,32 +1,70 @@
 name: codeql
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "23 4 * * 1" # weekly, Monday 04:23 UTC
+  merge_group:
+  workflow_dispatch:
 
 permissions:
-  security-events: write
   contents: read
-  actions: read
 
 concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  codeql:
-    name: codeql
-    runs-on: ubuntu-latest
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.changes.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: changes
+        with:
+          base: ${{ github.event.merge_group.base_sha || github.event.repository.default_branch }}
+          filters: .github/filters/ci.yml
+
+  scan:
+    name: Analyze Rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: rust
           build-mode: none
-      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:rust"
+
+  codeql:
+    name: codeql
+    if: always()
+    needs: [changes, scan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -L .github -e 'include "required"; security' <<< "$NEEDS"

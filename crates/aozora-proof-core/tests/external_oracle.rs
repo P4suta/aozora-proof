@@ -18,7 +18,7 @@ fn codes(text: &str) -> Vec<&'static str> {
 
 #[test]
 fn documented_jis_and_gaiji_examples_agree() {
-    assert!(codes("森鴎外").is_empty());
+    assert_eq!(codes("森鴎外"), Vec::<&str>::new());
     assert!(codes("森鷗外").contains(&"aozora::proof::character::needs_gaiji"));
 }
 

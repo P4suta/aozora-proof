@@ -1,0 +1,16 @@
+name = "aozora-proof"
+summary = "Proofread Aozora Bunko text with a Rust CLI and library"
+install = """
+git clone https://github.com/P4suta/aozora-proof.git
+cd aozora-proof
+cargo install --locked --path crates/aozora-proof-cli --bin aozora-proof
+"""
+usage_language = "sh"
+usage = "aozora-proof check --orthography mixed manuscript.txt"
+documentation_index = true
+copyright = "2026 afm contributors"
+license = "MIT OR Apache-2.0"
+
+[[consent]]
+contributor = "Yasunobu"
+evidence    = "https://github.com/P4suta/aozora-proof/commit/c8a1e26dcd18fdbfa0e5d461250f21e82b47dd9d"

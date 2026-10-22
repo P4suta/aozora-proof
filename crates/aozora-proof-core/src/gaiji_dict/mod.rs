@@ -155,7 +155,7 @@ mod tests {
     fn men_ku_ten_roundtrips_and_search_works() {
         assert_eq!(from_men_ku_ten(1, 14, 1), Some('\u{4FF1}'));
         let descs = gaiji_descriptions('\u{20089}');
-        assert!(!descs.is_empty());
+        assert_ne!(descs, Vec::<&str>::new());
         assert!(search(descs[0]).iter().any(|&(_, c)| c == '\u{20089}'));
     }
 
