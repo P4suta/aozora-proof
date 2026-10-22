@@ -3,9 +3,11 @@ name: release-ready
 on:
   push:
     branches: [main]
+    paths: [version.txt]
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
+  merge_group:
   workflow_dispatch:
     inputs:
       commit:
@@ -18,7 +20,7 @@ permissions:
 
 concurrency:
   group: release-ready-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,6 +30,7 @@ jobs:
   qualify:
     name: decide qualification
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       commit: ${{ steps.decision.outputs.commit }}
       full: ${{ steps.decision.outputs.full }}
@@ -39,6 +42,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
       - name: Decide whether this commit carries a release
         id: decision
         shell: bash
@@ -46,8 +50,6 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           COMMIT: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
           EVENT_NAME: ${{ github.event_name }}
-          HEAD_REF: ${{ github.head_ref }}
-          RELEASE_LABEL: "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}"
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
@@ -69,33 +71,44 @@ jobs:
              ! git diff --quiet "$BASE_SHA" "$COMMIT" -- version.txt; then
             changed=true
           fi
-          release_pr=false
-          if [[ "$HEAD_REF" == release-please--branches--main--components--aozora-proof ||
-                "$RELEASE_LABEL" == "true" ]]; then
-            release_pr=true
+          full=false
+          if [[ "$EVENT_NAME" != pull_request && "$EVENT_NAME" != merge_group ]]; then
+            decision=$(cargo run --quiet --locked -p xtask -- release qualify \
+              --event "$EVENT_NAME" \
+              --ref "$REF" \
+              --version-changed "$changed" \
+              --release-pr false \
+              --manual "$manual")
+            full=${decision#full=}
           fi
-          decision=$(cargo run --quiet --locked -p xtask -- release qualify \
-            --event "$EVENT_NAME" \
-            --ref "$REF" \
-            --version-changed "$changed" \
-            --release-pr "$release_pr" \
-            --manual "$manual")
-          full=${decision#full=}
           version=$(tr -d '[:space:]' <version.txt)
           {
             echo "commit=$COMMIT"
             echo "full=$full"
             echo "version=$version"
           } >>"$GITHUB_OUTPUT"
-          cargo run --quiet --locked -p xtask -- release check
+          if [[ "$EVENT_NAME" != pull_request && "$EVENT_NAME" != merge_group ]]; then
+            cargo run --quiet --locked -p xtask -- release check
+          fi
 
   no-op:
     name: qualification no-op
     if: needs.qualify.outputs.full != 'true'
     needs: qualify
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - run: echo "No release version change; qualification is intentionally a no-op."
+      - run: echo "Candidate qualification skipped for this event."
+
+  assurance:
+    name: Verify candidate checks
+    if: needs.qualify.outputs.full == 'true'
+    needs: qualify
+    permissions:
+      contents: read
+    uses: ./.github/workflows/assurance.yml
+    with:
+      commit: ${{ needs.qualify.outputs.commit }}
 
   build:
     name: build ${{ matrix.target }}
@@ -126,6 +139,7 @@ jobs:
             os: windows-2025
             executable: aozora-proof.exe
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,6 +161,8 @@ jobs:
           VERSION: ${{ needs.qualify.outputs.version }}
         run: |
           set -euo pipefail
+          cargo test --locked --workspace --all-targets --target "$TARGET"
+          cargo test --locked --workspace --doc --target "$TARGET"
           cargo build --locked --release --target "$TARGET" -p aozora-proof-cli
           binary="target/${TARGET}/release/${EXECUTABLE}"
           "$binary" --version | grep -F "aozora-proof ${VERSION} "
@@ -232,13 +248,14 @@ jobs:
             dist/*.spdx.json
             dist/*.artifact.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
   aggregate:
     name: aggregate qualified artifacts
     if: needs.qualify.outputs.full == 'true'
-    needs: [qualify, build]
+    needs: [qualify, build, assurance]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -280,7 +297,7 @@ jobs:
           name: release-qualified-${{ needs.qualify.outputs.commit }}
           path: qualified
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
   dispatch-release:
     name: dispatch qualified release
@@ -289,6 +306,7 @@ jobs:
       needs.qualify.outputs.full == 'true'
     needs: [qualify, aggregate]
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       actions: write
       contents: read
@@ -309,6 +327,7 @@ jobs:
     if: always()
     needs: [qualify, no-op, aggregate, dispatch-release]
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Report qualification result
         env:

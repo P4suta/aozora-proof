@@ -387,10 +387,9 @@ mod tests {
 
     #[test]
     fn clean_character_text_has_no_findings() {
-        assert!(
-            check("青空文庫のふつうの文章。亜")
-                .expect("character check")
-                .is_empty()
+        assert_eq!(
+            check("青空文庫のふつうの文章。亜").expect("character check"),
+            []
         );
     }
 }

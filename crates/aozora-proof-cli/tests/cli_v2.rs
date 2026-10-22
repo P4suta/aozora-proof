@@ -120,7 +120,7 @@ fn decode_failure_is_exit_two_without_machine_output() -> Result<(), TestError> 
     )?;
 
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout.as_slice(), b"");
     assert!(String::from_utf8(output.stderr)?.contains("cannot be decoded"));
     Ok(())
 }
@@ -264,7 +264,7 @@ fn stdin_fix_is_idempotent_shift_jis_output() -> Result<(), TestError> {
     assert!(first.status.success());
     assert!(second.status.success());
     assert_eq!(first.stdout, second.stdout);
-    assert!(!first.stdout.is_empty());
+    assert_ne!(first.stdout.as_slice(), b"");
     assert_ne!(first.stdout, "ガ\r\n".as_bytes());
     Ok(())
 }

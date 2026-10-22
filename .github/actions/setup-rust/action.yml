@@ -18,13 +18,23 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@f133eefe930d61f0d9371efd474daf0125ed3dd1 # 1.95.0
+    - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      id: toolchain
       with:
+        toolchain: 1.99.1
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
+    - id: pin
+      shell: bash
+      env:
+        INSTALLED: ${{ steps.toolchain.outputs.name }}
+      run: |
+        toolchain=$(sed -n 's/.*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+        [[ "$toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        [[ "$toolchain" == "$INSTALLED" ]]
     - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
     - if: ${{ inputs.tools != '' }}
-      uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+      uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
       with:
         tool: ${{ inputs.tools }}

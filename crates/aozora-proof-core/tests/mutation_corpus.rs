@@ -46,10 +46,10 @@ fn every_seeded_defect_is_detected() {
 
 #[test]
 fn clean_counterpart_stays_clean() {
-    assert!(
+    assert_eq!(
         run_all("青空文庫\r\n".as_bytes())
             .expect("clean input checks")
-            .findings
-            .is_empty()
+            .findings,
+        []
     );
 }

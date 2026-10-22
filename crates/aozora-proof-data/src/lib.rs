@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(shinji_for('\u{4ECF}'), None); // 仏 is already 新字体
         assert_eq!(shinji_for('あ'), None);
         assert!(kyuji_for('\u{4ECF}').contains(&'\u{4F5B}')); // 仏 → 佛
-        assert!(kyuji_for('あ').is_empty());
+        assert_eq!(kyuji_for('あ'), []);
     }
 
     #[test]
@@ -243,9 +243,9 @@ mod tests {
 
     #[test]
     fn gaiji_dict_lookup_and_search() {
-        assert!(gaiji_search("").is_empty());
+        assert_eq!(gaiji_search(""), Vec::<(&str, char)>::new());
         let descs = gaiji_descriptions('\u{20089}'); // has a 外字注記 description
-        assert!(!descs.is_empty());
+        assert_ne!(descs, Vec::<&str>::new());
         // Searching for that description finds the same character back.
         assert!(
             gaiji_search(descs[0])

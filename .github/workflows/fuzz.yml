@@ -1,39 +1,53 @@
 name: fuzz
 
 on:
-  schedule:
-    - cron: "37 4 * * 1" # Mondays, 04:37 UTC
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: fuzz-${{ github.ref }}
-  cancel-in-progress: true
+  group: fuzz-${{ inputs.commit || github.sha }}
+  cancel-in-progress: false
 
 jobs:
   fuzz:
     name: fuzz
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         target: [run_all, gaiji, fix, wire]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # cargo-fuzz / libFuzzer need nightly; the detached fuzz crate pins a
-      # dated toolchain so scheduled runs remain reproducible.
-      - uses: dtolnay/rust-toolchain@f133eefe930d61f0d9371efd474daf0125ed3dd1 # 1.95.0 action
         with:
-          toolchain: nightly-2026-07-15
+          ref: ${{ inputs.commit || github.sha }}
+          persist-credentials: false
+      # Parser exploration uses a dated nightly for the detached crate.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        id: toolchain
+        with:
+          toolchain: nightly-2026-10-19
           targets: x86_64-unknown-linux-gnu
+      - id: pin
+        env:
+          INSTALLED: ${{ steps.toolchain.outputs.name }}
+        run: |
+          toolchain=$(sed -n 's/.*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' fuzz/rust-toolchain.toml)
+          [[ "$toolchain" =~ ^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          [[ "$toolchain" == "$INSTALLED" ]]
       - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: fuzz
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-fuzz@0.13.2
       - name: Fuzz ${{ matrix.target }}
@@ -41,7 +55,9 @@ jobs:
         # `--target …-gnu`: cargo-fuzz's host default resolved to a static-musl
         # target on the runner, which the address sanitizer rejects; pin the
         # dynamic-libc gnu target explicitly.
-        run: cargo +nightly-2026-07-15 fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- -max_total_time=120
+        run: |
+          cargo metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
+          cargo +${{ steps.toolchain.outputs.name }} fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- -runs=10000 -seed=1
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -49,3 +65,4 @@ jobs:
           name: fuzz-artifacts-${{ matrix.target }}
           path: fuzz/artifacts
           if-no-files-found: ignore
+          retention-days: 7

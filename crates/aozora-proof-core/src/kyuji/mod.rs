@@ -125,12 +125,8 @@ mod tests {
         let traditional = check("来", Orthography::Traditional).expect("traditional check");
         assert_eq!(traditional.len(), 1);
         assert_eq!(traditional[0].code, codes::TRADITIONAL_CANDIDATE);
-        assert!(!traditional[0].fixes.is_empty());
+        assert_ne!(traditional[0].fixes, []);
 
-        assert!(
-            check("來来", Orthography::Mixed)
-                .expect("mixed check")
-                .is_empty()
-        );
+        assert_eq!(check("來来", Orthography::Mixed).expect("mixed check"), []);
     }
 }

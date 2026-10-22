@@ -260,7 +260,7 @@ fn sync(root: &Path, version: &Version) -> Result<(), String> {
     let cargo = replace_workspace_version(&cargo, &version)?;
     write_if_changed(&cargo_path, &cargo)?;
 
-    let readme_path = root.join("README.md");
+    let readme_path = root.join("docs/README.md");
     let readme = read(&readme_path)?;
     let readme = replace_action_references(&readme, &version)?;
     write_if_changed(&readme_path, &readme)?;
@@ -343,7 +343,7 @@ fn replace_action_references(contents: &str, version: &str) -> Result<String, St
         result.push('\n');
     }
     if replacements == 0 {
-        return Err("README.md has no versioned aozora-proof Action reference".to_owned());
+        return Err("docs/README.md has no versioned aozora-proof Action reference".to_owned());
     }
     Ok(result)
 }
@@ -468,10 +468,12 @@ fn check_lock(root: &Path, version: &Version) -> Result<(), String> {
 }
 
 fn check_readme(root: &Path, version: &Version) -> Result<(), String> {
-    let readme = read(root.join("README.md"))?;
+    let readme = read(root.join("docs/README.md"))?;
     let expected = replace_action_references(&readme, &version.to_string())?;
     if readme != expected {
-        return Err("README.md Action reference is out of sync; run just release-sync".to_owned());
+        return Err(
+            "docs/README.md Action reference is out of sync; run just release-sync".to_owned(),
+        );
     }
     Ok(())
 }

@@ -1,0 +1,65 @@
+name: Candidate assurance
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  coverage:
+    name: coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: llvm-tools-preview
+          tools: cargo-llvm-cov@0.9.1
+      - name: Collect coverage (run tests once)
+        run: cargo llvm-cov --workspace --no-report
+      - name: Report (lcov + HTML + summary)
+        run: |
+          cargo llvm-cov report --lcov --output-path lcov.info
+          cargo llvm-cov report --html
+          cargo llvm-cov report --summary-only
+      - name: Upload coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage
+          path: |
+            lcov.info
+            target/llvm-cov/html
+          if-no-files-found: error
+          retention-days: 7
+
+  fuzz:
+    uses: ./.github/workflows/fuzz.yml
+    with:
+      commit: ${{ inputs.commit }}
+
+  required:
+    if: always()
+    needs: [coverage, fuzz]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -L .github -e 'include "required"; assurance' <<< "$NEEDS"

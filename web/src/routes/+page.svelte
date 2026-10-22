@@ -80,7 +80,7 @@
 					>
 						{SEV[f.severity]?.label ?? f.severity}
 					</span>
-					<span class="flex-none text-[0.85rem] tabular-nums text-muted">L{f.line}</span>
+					<span class="flex-none text-[0.85rem] text-muted tabular-nums">L{f.line}</span>
 					<span class="flex-1 basis-64">{f.canonicalMessage}</span>
 					{#if f.title}
 						<span
