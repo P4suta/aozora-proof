@@ -21,5 +21,6 @@ jobs:
         with:
           license-check: true
           vulnerability-check: true
+          fail-on-scopes: runtime, development, unknown
           base-ref: ${{ github.event.merge_group.base_sha }}
           head-ref: ${{ github.event.merge_group.head_sha }}
