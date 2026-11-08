@@ -1,0 +1,13 @@
+workplace     = "8f95af89faf8535b63a6"
+repository    = "P4suta/aozora-proof"
+repository_id = 1271370302
+owner_id      = 42543015
+environment   = "release-please"
+branches      = ["main"]
+project       = "aozora-proof"
+source_config = "automation"
+config        = "github_automation"
+
+[fields]
+RELEASE_PLEASE_APP_ID          = "GITHUB_APP_CLIENT_ID"
+RELEASE_PLEASE_APP_PRIVATE_KEY = "GITHUB_APP_PRIVATE_KEY"
