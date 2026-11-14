@@ -4,4 +4,4 @@ allowBuilds:
 
 overrides:
   brace-expansion: 5.0.12
-  postcss: 8.5.31
+  postcss: 8.5.32

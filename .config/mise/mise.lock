@@ -13,7 +13,7 @@ version = "0.9.1"
 backend = "cargo:cargo-llvm-cov"
 
 [[tools."cargo:cargo-nextest"]]
-version = "0.9.149"
+version = "0.9.151"
 backend = "cargo:cargo-nextest"
 
 [[tools."cargo:taplo-cli"]]
@@ -21,7 +21,7 @@ version = "0.10.0"
 backend = "cargo:taplo-cli"
 
 [[tools."cargo:wasm-pack"]]
-version = "0.15.0"
+version = "0.15.1"
 backend = "cargo:wasm-pack"
 
 [[tools."cargo:watchexec-cli"]]
