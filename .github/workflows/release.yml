@@ -24,7 +24,7 @@ concurrency:
 jobs:
   verify:
     name: verify qualified commit
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       qualification_run: ${{ steps.qualification.outputs.run_id }}
       tag: ${{ steps.version.outputs.tag }}
@@ -131,7 +131,7 @@ jobs:
     name: create tag and draft
     if: ${{ !inputs.dry_run }}
     needs: verify
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     environment: release-please
     permissions:
       actions: write # Dispatch approval under docs/adr/sync-release-app-credentials-to-the-protected-environment.md.
