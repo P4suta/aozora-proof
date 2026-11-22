@@ -30,7 +30,7 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
           persist-credentials: false
       # Parser exploration uses a dated nightly for the detached crate.
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         id: toolchain
         with:
           toolchain: nightly-2026-10-22
