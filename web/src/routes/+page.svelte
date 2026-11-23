@@ -91,9 +91,9 @@
 					{/if}
 					{#if f.fixAlternatives[0]}
 						<span class="w-full text-[0.85rem] text-muted">
-							↳ 提案: <span class="font-serif text-fg"
-								>{f.fixAlternatives[0].label}</span
-							>
+							↳ 提案: <span class="font-serif text-fg">
+								{f.fixAlternatives[0].label}
+							</span>
 						</span>
 					{/if}
 				</li>
