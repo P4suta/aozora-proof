@@ -7,11 +7,11 @@
 # cargo-tool minors mirror CI's install-action pins
 # (.github/workflows/ci.yml) for local == CI parity — bump them together.
 [tools]
-rust                   = "1.99.1"
-"cargo:cargo-nextest"  = "0.9.149"
-"cargo:cargo-deny"     = "0.20.2"
+rust                   = "1.100.0"
+"cargo:cargo-nextest"  = "0.9.152"
+"cargo:cargo-deny"     = "0.22.0"
 "cargo:cargo-llvm-cov" = "0.9.1"
-"cargo:wasm-pack"      = "0.15.0"
+"cargo:wasm-pack"      = "0.15.1"
 "cargo:bacon"          = "3.26.0"
 "cargo:watchexec-cli"  = "2.8.0"
 "cargo:taplo-cli"      = "0.10.0"

@@ -5,7 +5,7 @@ version = "3.26.0"
 backend = "cargo:bacon"
 
 [[tools."cargo:cargo-deny"]]
-version = "0.20.2"
+version = "0.22.0"
 backend = "cargo:cargo-deny"
 
 [[tools."cargo:cargo-llvm-cov"]]
@@ -13,7 +13,7 @@ version = "0.9.1"
 backend = "cargo:cargo-llvm-cov"
 
 [[tools."cargo:cargo-nextest"]]
-version = "0.9.149"
+version = "0.9.152"
 backend = "cargo:cargo-nextest"
 
 [[tools."cargo:taplo-cli"]]
@@ -21,7 +21,7 @@ version = "0.10.0"
 backend = "cargo:taplo-cli"
 
 [[tools."cargo:wasm-pack"]]
-version = "0.15.0"
+version = "0.15.1"
 backend = "cargo:wasm-pack"
 
 [[tools."cargo:watchexec-cli"]]
@@ -29,5 +29,5 @@ version = "2.8.0"
 backend = "cargo:watchexec-cli"
 
 [[tools.rust]]
-version = "1.99.1"
+version = "1.100.0"
 backend = "core:rust"
